@@ -2,15 +2,15 @@ import time
 
 import pytest
 
-from mia_bridge.config import Config
-from mia_bridge.llm import Classification
-from mia_bridge.messages import Incoming
-from mia_bridge.settings import Settings
-from mia_bridge.store import Store
+from kinchat.config import Config
+from kinchat.llm import Classification
+from kinchat.messages import Incoming
+from kinchat.settings import Settings
+from kinchat.store import Store
 
 CHAT = "iMessage;+;chat123"
-ALEX = "+13035550100"
-SAM = "+13035550101"
+ALEX = "+18005550100"
+SAM = "+18005550101"
 DM_ALEX = f"iMessage;-;{ALEX}"
 
 

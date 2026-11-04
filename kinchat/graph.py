@@ -1,4 +1,4 @@
-"""Microsoft Graph client: app-only certificate auth, Mia's inbox delta, task mail, calendar snapshot."""
+"""Microsoft Graph client: app-only certificate auth, the assistant's inbox delta, task mail, calendar snapshot."""
 from __future__ import annotations
 
 import logging
@@ -66,7 +66,7 @@ class Graph:
         )
 
     def send_to_self(self, subject: str, body: str) -> str | None:
-        """Send mail from Mia to Mia. Returns the internetMessageId of the sent message."""
+        """Send mail from the assistant's mailbox to itself. Returns the internetMessageId of the sent message."""
         msg = {
             "subject": subject,
             "body": {"contentType": "Text", "content": body},

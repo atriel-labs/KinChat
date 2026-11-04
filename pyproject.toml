@@ -1,7 +1,7 @@
 [project]
-name = "mia-bridge"
+name = "kinchat"
 version = "0.1.0"
-description = "iMessage bridge that puts Mia in the family group chat"
+description = "A Claude-powered assistant for your family's iMessage group chat"
 requires-python = ">=3.12"
 dependencies = [
     "anthropic>=2.4",
@@ -15,10 +15,10 @@ dependencies = [
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
-mia-bridge = "mia_bridge.__main__:main"
+kinchat = "kinchat.__main__:main"
 
 [tool.setuptools]
-packages = ["mia_bridge"]
+packages = ["kinchat"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

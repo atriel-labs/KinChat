@@ -2,8 +2,8 @@ import json
 
 from conftest import CHAT
 
-from mia_bridge.llm import TaskRequest
-from mia_bridge.tasks import ResultPoller, TaskDesk, accept_result, parse_result_body
+from kinchat.llm import TaskRequest
+from kinchat.tasks import ResultPoller, TaskDesk, accept_result, parse_result_body
 
 MIA = "mia@example.com"
 
@@ -64,7 +64,7 @@ def test_update_cannot_cross_chats(cfg, store):
     sent = []
     d = desk(cfg, store, sent)
     d.hand_off(req(), CHAT, "Alex")
-    t = d.hand_off(req("change it", update="T-0001"), "iMessage;-;+13035550101", "Sam")
+    t = d.hand_off(req("change it", update="T-0001"), "iMessage;-;+18005550101", "Sam")
     assert t.task_id == "T-0002"
 
 

@@ -1,4 +1,4 @@
-"""mia-bridge CLI: run the service, check setup, or list chats found in chat.db."""
+"""kinchat CLI: run the service, check setup, or list chats found in chat.db."""
 from __future__ import annotations
 
 import argparse
@@ -55,7 +55,6 @@ def cmd_check(cfg: config_mod.Config) -> int:
 
     import anthropic
 
-    from .graph import Graph
     from .messages import ChatDB, messages_scriptable
 
     print(f"shadow_mode={cfg.shadow_mode}, dashboard http://{cfg.dashboard.bind}:{cfg.dashboard.port}")
@@ -70,6 +69,7 @@ def cmd_check(cfg: config_mod.Config) -> int:
         for m in (cfg.replier.model_router, cfg.replier.model_reply)))
 
     def graph():
+        from .graph import Graph  # imports msal
         g = cfg.graph
         client = Graph(g.tenant, g.client_id, g.cert_thumbprint, secrets.graph_cert_private_key(), g.mailbox, cfg.timezone)
         client._get(f"/users/{g.mailbox}/mailFolders/inbox", {"$select": "totalItemCount"})
@@ -80,7 +80,7 @@ def cmd_check(cfg: config_mod.Config) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="mia-bridge")
+    p = argparse.ArgumentParser(prog="kinchat")
     p.add_argument("command", nargs="?", default="run", choices=["run", "check", "chats"])
     p.add_argument("--config", type=Path, default=APP_DIR / "config.yaml")
     p.add_argument("-v", "--verbose", action="store_true")

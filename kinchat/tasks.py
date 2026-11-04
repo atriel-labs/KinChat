@@ -1,4 +1,4 @@
-"""Task handoff to Mia in Duet ([MIA-CHAT]) and result acceptance ([MIA-POST])."""
+"""Task handoff to the agent by email ([<TAG>-CHAT], default [MIA-CHAT]) and result acceptance ([<TAG>-POST])."""
 from __future__ import annotations
 
 import json
@@ -15,7 +15,11 @@ from .store import Store, Task
 
 log = logging.getLogger(__name__)
 
-POST_SUBJECT_RE = re.compile(r"^\s*(?:(?:re|aw|fw|fwd)\s*:\s*)*\[MIA-POST\]\s*(T-\d{4,})\b", re.IGNORECASE)
+def post_subject_re(tag: str = "MIA") -> re.Pattern:
+    return re.compile(rf"^\s*(?:(?:re|aw|fw|fwd)\s*:\s*)*\[{re.escape(tag)}-POST\]\s*(T-\d{{4,}})\b", re.IGNORECASE)
+
+
+POST_SUBJECT_RE = post_subject_re()
 STATUS_RE = re.compile(r"^\s*STATUS\s*:\s*(done|needs_input|failed)\s*$", re.IGNORECASE | re.MULTILINE)
 MAX_RESULT_CHARS = 600
 
@@ -47,17 +51,17 @@ def parse_result_body(body: str) -> tuple[str, str | None]:
     return text, status
 
 
-def accept_result(msg: dict, mailbox: str, store: Store) -> ParsedResult | None:
+def accept_result(msg: dict, mailbox: str, store: Store, tag: str = "MIA") -> ParsedResult | None:
     """Apply the bridge acceptance rules to a fetched Graph message. Returns None (and logs) on rejection."""
     mid = msg.get("id", "?")
     subject = msg.get("subject") or ""
-    m = POST_SUBJECT_RE.match(subject)
+    m = (POST_SUBJECT_RE if tag == "MIA" else post_subject_re(tag)).match(subject)
     if not m:
-        return None  # not a result email; [MIA-CHAT] copies and other mail land here too
+        return None  # not a result email; [<TAG>-CHAT] copies and other mail land here too
     task_id = m.group(1).upper()
 
     def reject(why: str) -> None:
-        log.warning("rejected [MIA-POST] %s for %s: %s", mid, task_id, why)
+        log.warning("rejected [%s-POST] %s for %s: %s", tag, mid, task_id, why)
 
     addr = lambda f: ((msg.get(f) or {}).get("emailAddress") or {}).get("address", "").lower()
     if addr("from") != mailbox.lower() or addr("sender") != mailbox.lower():
@@ -82,7 +86,7 @@ class TaskDesk:
         self._send_mail = send_mail
 
     def hand_off(self, req: TaskRequest, chat: str, requested_by: str) -> Task | None:
-        """Create or update a task and email it to Mia. In shadow mode, log only."""
+        """Create or update a task and email it to the agent. In shadow mode, log only."""
         if self.cfg.shadow_mode or self._send_mail is None:
             log.info("[shadow] would hand off task from %s: %s", requested_by, req)
             return None
@@ -97,7 +101,7 @@ class TaskDesk:
             task_id = self.store.next_task_id()
             self.store.create_task(task_id, chat, req.summary, req.details, requested_by)
 
-        context = format_transcript(self.store.recent_messages(chat, 10), self.cfg.tz)
+        context = format_transcript(self.store.recent_messages(chat, 10), self.cfg.tz, self.cfg.assistant.name)
         payload = {
             "task_id": task_id,
             "summary": req.summary,
@@ -114,7 +118,7 @@ class TaskDesk:
             + f"\n\nRecent chat:\n{context}\n\n```json\n{json.dumps(payload, indent=2, ensure_ascii=False)}\n```\n"
         )
         try:
-            msg_id = self._send_mail(f"[MIA-CHAT] {task_id}: {req.summary}", body)
+            msg_id = self._send_mail(f"[{self.cfg.assistant.tag}-CHAT] {task_id}: {req.summary}", body)
         except Exception:
             log.exception("failed to send task email for %s", task_id)
             return self.store.get_task(task_id)
@@ -130,6 +134,8 @@ class ResultPoller:
         self.graph = graph
         self.post = post
         self.last_ok: float | None = None
+        self._tag = cfg.assistant.tag
+        self._subject_re = post_subject_re(self._tag)
 
     def poll_once(self) -> int:
         delta = self.store.kv_get("inbox_delta_link")
@@ -137,9 +143,10 @@ class ResultPoller:
         items, next_link = self.graph.inbox_delta(delta, since)
         posted = 0
         for item in items:
-            if not POST_SUBJECT_RE.match(item.get("subject") or ""):
+            if not self._subject_re.match(item.get("subject") or ""):
                 continue
-            result = accept_result(self.graph.get_message_for_post(item["id"]), self.graph.mailbox, self.store)
+            result = accept_result(self.graph.get_message_for_post(item["id"]), self.graph.mailbox, self.store,
+                                   self._tag)
             if result is None:
                 continue
             posted += self._post(item["id"], result)

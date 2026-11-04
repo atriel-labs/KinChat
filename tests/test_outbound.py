@@ -3,9 +3,9 @@ from zoneinfo import ZoneInfo
 
 from conftest import CHAT, DM_ALEX
 
-from mia_bridge.outbound import Outbound
+from kinchat.outbound import Outbound, PostStatus
 
-TZ = ZoneInfo("America/Denver")
+TZ = ZoneInfo("America/New_York")
 
 
 class Clock:
@@ -23,8 +23,8 @@ def make(store, settings, clock, sent, shadow=False):
 def test_rate_limit_queues_and_combines(store, settings):
     sent, clock = [], Clock()
     out = make(store, settings, clock, sent)
-    for i in range(8):
-        out.post(CHAT, f"m{i}")
+    statuses = [out.post(CHAT, f"m{i}") for i in range(8)]
+    assert statuses == [PostStatus.SENT] * 6 + [PostStatus.QUEUED] * 2
     assert [t for _, t in sent] == [f"m{i}" for i in range(6)]
     out.tick()
     assert len(sent) == 6
@@ -37,8 +37,8 @@ def test_rate_limit_queues_and_combines(store, settings):
 def test_quiet_hours_hold_until_morning(store, settings):
     sent, clock = [], Clock(hour=23)
     out = make(store, settings, clock, sent)
-    out.post(CHAT, "Booked for Saturday!")
-    out.post(CHAT, "Also, the dentist moved.")
+    assert out.post(CHAT, "Booked for Saturday!") == PostStatus.HELD
+    assert out.post(CHAT, "Also, the dentist moved.") == "held"  # a StrEnum compares equal to its value
     out.tick()
     assert sent == []
     clock.t += 8 * 3600  # 7 AM
@@ -48,30 +48,39 @@ def test_quiet_hours_hold_until_morning(store, settings):
 
 def test_urgent_bypasses_quiet_hours(store, settings):
     sent, clock = [], Clock(hour=2)
-    make(store, settings, clock, sent).post(CHAT, "The pharmacy is 303-555-0199", urgent=True)
-    assert sent == [(CHAT, "The pharmacy is 303-555-0199")]
+    assert make(store, settings, clock, sent).post(CHAT, "The pharmacy is 800-555-0199", urgent=True) == "sent"
+    assert sent == [(CHAT, "The pharmacy is 800-555-0199")]
 
 
 def test_quiet_hours_toggle_off(store, settings):
     settings.set_feature("quiet_hours", False)
     sent, clock = [], Clock(hour=23)
-    make(store, settings, clock, sent).post(CHAT, "hi")
+    assert make(store, settings, clock, sent).post(CHAT, "hi") == PostStatus.SENT
     assert sent == [(CHAT, "hi")]
 
 
 def test_dashboard_blocks_posting(store, settings):
     sent, clock = [], Clock()
     out = make(store, settings, clock, sent)
-    out.post(DM_ALEX, "hi")  # one-on-one toggle off
+    assert out.post(DM_ALEX, "hi") == PostStatus.REFUSED  # one-on-one toggle off
     settings.set_chat_mode(CHAT, "listen")
-    out.post(CHAT, "hi")
+    assert out.post(CHAT, "hi") == PostStatus.REFUSED
     settings.set_chat_mode(CHAT, "respond")
     settings.set_feature("mia_enabled", False)
-    out.post(CHAT, "hi")
+    assert out.post(CHAT, "hi") == PostStatus.REFUSED
+    assert out.post(CHAT, "   ") == PostStatus.REFUSED
     assert sent == []
 
 
 def test_shadow_mode_never_sends(store, settings):
     sent = []
-    make(store, settings, Clock(), sent, shadow=True).post(CHAT, "hi")
+    assert make(store, settings, Clock(), sent, shadow=True).post(CHAT, "hi") == PostStatus.SHADOW
     assert sent == []
+
+
+def test_send_failure_reported(store, settings):
+    def boom(chat, text):
+        raise RuntimeError("osascript failed")
+    out = Outbound(store, settings, boom, 6, 12, False, TZ, 22, 7, Clock())
+    assert out.post(CHAT, "hi") == PostStatus.FAILED
+    assert not store.window_active(CHAT)
