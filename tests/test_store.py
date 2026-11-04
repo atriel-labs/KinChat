@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from kinchat.store import SCHEMA_VERSION, Store, schema_version
+from kinchat.store import MIGRATIONS, SCHEMA_VERSION, Store, schema_version
 
 # The decisions and kv tables as they were before the classifier columns and before schema versioning.
 OLD_SCHEMA = """
@@ -16,7 +16,7 @@ CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT);
 
 def test_fresh_database_is_current_version(tmp_path):
     store = Store(tmp_path / "state.db")
-    assert schema_version(store._db) == SCHEMA_VERSION == 2
+    assert schema_version(store._db) == SCHEMA_VERSION == len(MIGRATIONS)
     Store(tmp_path / "state.db")  # reopening is a no-op
     assert schema_version(store._db) == SCHEMA_VERSION
 
@@ -88,4 +88,6 @@ def test_v2_namespaces_existing_chat_ids(tmp_path):
     notes = [tuple(r) for r in store._q("SELECT text, chat_guid FROM notes ORDER BY id")]
     assert notes == [("n", chat), ("no chat", None)]
     Store(path)  # idempotent: nothing is prefixed twice
-    assert store.get_task("T-0001").chat_guid == "imessage:iMessage;-;+18005550100"
+    t = store.get_task("T-0001")
+    assert t.chat_guid == "imessage:iMessage;-;+18005550100"
+    assert (t.backend, t.session_id) == ("mailbox", None)  # v3: existing tasks belong to the mailbox backend

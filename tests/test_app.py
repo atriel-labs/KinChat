@@ -52,3 +52,41 @@ def test_graph_and_msal_imported_lazily():
     code = "import sys, kinchat.app; print('msal' in sys.modules, 'kinchat.graph' in sys.modules)"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
     assert out.split() == ["False", "False"]
+
+
+class FakeGraphMail:
+    name = "graph"
+    address = "mia@example.com"
+
+    def __init__(self):
+        self.sent = []
+
+    def send(self, subject, body):
+        self.sent.append((subject, body))
+        return "<id>"
+
+    def fetch_results(self, subject_re, tag):
+        return []
+
+    def commit(self):
+        pass
+
+
+def test_default_task_backend_is_mailbox_with_heartbeat(no_secrets, bare_cfg):
+    bare_cfg.shadow_mode = False
+    bridge = Bridge(bare_cfg)
+    assert bridge.tasks.name == "mailbox" and bridge.tasks.health.status.name == "mail"
+    bridge._heartbeat()  # no mail transport (Graph not configured): skipped
+    bridge.tasks.mail = FakeGraphMail()
+    bridge._heartbeat()
+    (subject, body), = bridge.tasks.mail.sent
+    assert subject.startswith("[MIA-HEARTBEAT] ") and "Mia enabled: yes" in body and "Open tasks: 0" in body
+
+
+def test_none_task_backend(no_secrets, bare_cfg):
+    bare_cfg.tasks.backend = "none"
+    bare_cfg.shadow_mode = False
+    bridge = Bridge(bare_cfg)
+    assert bridge.tasks.name == "none" and not bridge.tasks.accepts_tasks
+    bridge._heartbeat()  # no heartbeat without the mailbox backend
+    assert "mail" not in {s.name for s in bridge.health.snapshot()}

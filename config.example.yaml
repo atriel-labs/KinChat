@@ -21,6 +21,10 @@ messages:                  # the imessage transport
   chat_db: ~/Library/Messages/chat.db
   poll_seconds: 2
 
+tasks:
+  backend: mailbox         # mailbox: email tasks to an agent ([MIA-CHAT] out, [MIA-POST] back); none: no tasks
+  mail: graph              # mailbox only: how mail is sent and read
+
 routing:
   window_minutes: 12
   respond_threshold: 0.75

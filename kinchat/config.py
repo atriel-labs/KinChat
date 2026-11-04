@@ -13,6 +13,9 @@ from .settings import CALLING_CODES
 
 _LIBRARY = Path.home() / "Library"
 
+TASK_BACKENDS = ("mailbox", "none")
+MAIL_TRANSPORTS = ("graph",)
+
 
 def _valid_zone(name: str | None) -> str | None:
     if not name:
@@ -63,6 +66,12 @@ class Messages:
 @dataclass
 class Chat:
     transports: list[str] = field(default_factory=lambda: ["imessage"])  # imessage, fake
+
+
+@dataclass
+class Tasks:
+    backend: str = "mailbox"  # mailbox or none
+    mail: str = "graph"       # mailbox only: graph
 
 
 @dataclass
@@ -128,6 +137,7 @@ class Assistant:
 class Config:
     messages: Messages = field(default_factory=Messages)
     chat: Chat = field(default_factory=Chat)
+    tasks: Tasks = field(default_factory=Tasks)
     routing: Routing = field(default_factory=Routing)
     replier: Replier = field(default_factory=Replier)
     dashboard: Dashboard = field(default_factory=Dashboard)
@@ -156,6 +166,7 @@ def load(path: Path) -> Config:
     cfg = Config(
         messages=_section(Messages, raw.get("messages")),
         chat=_section(Chat, raw.get("chat")),
+        tasks=_section(Tasks, raw.get("tasks")),
         routing=_section(Routing, raw.get("routing")),
         replier=_section(Replier, raw.get("replier")),
         dashboard=_section(Dashboard, raw.get("dashboard")),
@@ -177,6 +188,10 @@ def load(path: Path) -> Config:
     bad = [t for t in cfg.chat.transports if t not in known]
     if bad or not cfg.chat.transports:
         raise ValueError(f"config: chat.transports must list some of {', '.join(sorted(known))}")
+    if cfg.tasks.backend not in TASK_BACKENDS:
+        raise ValueError(f"config: tasks.backend must be one of {', '.join(TASK_BACKENDS)}")
+    if cfg.tasks.mail not in MAIL_TRANSPORTS:
+        raise ValueError(f"config: tasks.mail must be one of {', '.join(MAIL_TRANSPORTS)}")
     a = cfg.assistant
     if not a.name.strip() or not a.tag.strip():
         raise ValueError("config: assistant.name and assistant.tag must not be empty")

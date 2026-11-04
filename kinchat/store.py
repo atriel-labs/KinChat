@@ -137,8 +137,14 @@ def _v2(db: sqlite3.Connection) -> None:
         db.execute(f"UPDATE {table} SET {col} = 'imessage:' || {col} WHERE {col} IS NOT NULL AND instr({col}, ':') = 0")
 
 
+def _v3(db: sqlite3.Connection) -> None:
+    """Tasks remember which backend owns them and, for session-based backends, the session ID."""
+    db.execute("ALTER TABLE tasks ADD COLUMN backend TEXT NOT NULL DEFAULT 'mailbox'")
+    db.execute("ALTER TABLE tasks ADD COLUMN session_id TEXT")
+
+
 # MIGRATIONS[i] takes a database from user_version i to i + 1. Append only.
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2]
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -197,6 +203,8 @@ class Task:
     created_ts: float
     updated_ts: float
     email_msg_id: str | None
+    backend: str = "mailbox"
+    session_id: str | None = None
 
 
 class Store:
@@ -292,12 +300,12 @@ class Store:
             return f"T-{n:04d}"
 
     def create_task(self, task_id: str, chat_guid: str, summary: str, details: str | None,
-                    requested_by: str | None) -> Task:
+                    requested_by: str | None, backend: str = "mailbox", session_id: str | None = None) -> Task:
         now = time.time()
         self._q(
-            "INSERT INTO tasks (task_id, chat_guid, summary, details, status, requested_by, created_ts, updated_ts)"
-            " VALUES (?, ?, ?, ?, 'open', ?, ?, ?)",
-            (task_id, chat_guid, summary, details, requested_by, now, now),
+            "INSERT INTO tasks (task_id, chat_guid, summary, details, status, requested_by, created_ts, updated_ts,"
+            " backend, session_id) VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)",
+            (task_id, chat_guid, summary, details, requested_by, now, now, backend, session_id),
         )
         return self.get_task(task_id)
 

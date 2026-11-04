@@ -22,7 +22,7 @@ from .outbound import Outbound
 from .router import Decision, Router
 from .settings import Notes, Settings
 from .store import Message, Store, Task
-from .tasks import ResultPoller, TaskDesk
+from .tasks import NoTaskBackend, TaskBackend
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +45,6 @@ class Bridge:
             if getattr(t, "send_health", None) is not None:
                 self.health.register(t.send_health)
         self.h_llm = self.health.add("llm", "Claude API")
-        self.h_mail = self.health.add("mail", "Task mail (Graph)")
         self.h_calendar = self.health.add("calendar", "Calendar (Graph)")
         self.h_dashboard = self.health.add("dashboard", "Dashboard password")
 
@@ -59,8 +58,8 @@ class Bridge:
                                  cfg.routing.window_minutes, cfg.shadow_mode, cfg.tz,
                                  cfg.quiet_hours.start, cfg.quiet_hours.end)
         self.router = Router(cfg, self.store, self.settings, self._classify, self.transports.participants)
-        self.desk = TaskDesk(cfg, self.store, self._send_mail if self.graph else None)
-        self.poller = ResultPoller(cfg, self.store, self.graph, self.outbound.post)
+        self.tasks: TaskBackend = self._make_task_backend()
+        self.health.register(self.tasks.health)
 
     # --- startup ----------------------------------------------------------
 
@@ -88,20 +87,20 @@ class Bridge:
 
     def _start_graph(self):
         g = self.cfg.graph
+        self.graph_error: str | None = None
         missing = [k for k in ("tenant", "client_id", "cert_thumbprint", "mailbox") if not getattr(g, k)]
         if missing:
-            for h in (self.h_mail, self.h_calendar):
-                h.failed(f"graph not configured (missing {', '.join(missing)})")
+            self.graph_error = f"graph not configured (missing {', '.join(missing)})"
+            self.h_calendar.failed(self.graph_error)
             return None
         try:
             from .graph import Graph  # imports msal; only needed when Graph is configured
             graph = Graph(g.tenant, g.client_id, g.cert_thumbprint, secrets.graph_cert_private_key(),
                           g.mailbox, self.cfg.timezone)
         except Exception as e:
-            for h in (self.h_mail, self.h_calendar):
-                h.failed(e)
+            self.graph_error = f"{type(e).__name__}: {e}"
+            self.h_calendar.failed(e)
             return None
-        self.h_mail.degraded("inbox not polled yet")
         if g.calendars:
             self.h_calendar.degraded("not refreshed yet")
         else:
@@ -141,14 +140,25 @@ class Bridge:
             self.h_llm.ok()
         return result
 
-    def _send_mail(self, subject: str, body: str) -> str | None:
-        try:
-            msg_id = self.graph.send_to_self(subject, body)
-        except Exception as e:
-            self.h_mail.degraded(e)
-            raise
-        self.h_mail.ok()
-        return msg_id
+    def _make_task_backend(self) -> TaskBackend:
+        t = self.cfg.tasks
+        if t.backend == "none":
+            return NoTaskBackend()
+        from .backends.mailbox import MailboxBackend
+        mail = None
+        if self.graph is not None:
+            from .backends.mail_graph import GraphMail
+            mail = GraphMail(self.graph, self.store)
+        backend = MailboxBackend(self.cfg, self.store, mail, self.outbound.post)
+        if mail is None:
+            backend.health.failed(self.graph_error or "no mail transport")
+        else:
+            backend.health.degraded("inbox not polled yet")
+        return backend
+
+    @property
+    def h_mail(self):
+        return self.tasks.health
 
     # --- incoming messages -------------------------------------------------
 
@@ -171,7 +181,8 @@ class Bridge:
             family_md = cfg.family_md.read_text()
         except OSError:
             family_md = "(no family notes)"
-        can_hand_off = self.settings.feature("task_handoff") and d.contact.can_assign
+        can_hand_off = (self.settings.feature("task_handoff") and d.contact.can_assign
+                        and getattr(self.tasks, "accepts_tasks", True))
         reply: Reply | None = self._llm_result(self.llm.reply(
             self.store.recent_messages(chat, cfg.replier.reply_history_messages),
             self.store.relevant_tasks(chat), self.calendar, family_md, d.classification,
@@ -186,7 +197,7 @@ class Bridge:
             self.outbound.post(chat, HANDOFF_ACK, urgent=d.urgent)
         log.info("handled %s in %.1fs%s", inc.guid, time.time() - inc.ts, " (shadow)" if cfg.shadow_mode else "")
         if task:
-            self.desk.hand_off(task, chat, d.contact.name)
+            self.tasks.hand_off(task, chat, d.contact.name)
         if reply.notes and self.settings.feature("note_suggestions"):
             added = sum(self.notes.suggest(n, chat, d.contact.name) for n in reply.notes)
             if added:
@@ -240,7 +251,9 @@ class Bridge:
             log.info("pruned %d messages older than %d days", n, self.cfg.history_retention_days)
 
     def _heartbeat(self) -> None:
-        if self.cfg.shadow_mode or not self.settings.feature("heartbeat") or self.graph is None:
+        # The heartbeat is mail to the agent's mailbox, so it only exists with the mailbox backend.
+        mailbox = self.tasks if getattr(self.tasks, "name", "") == "mailbox" else None
+        if self.cfg.shadow_mode or not self.settings.feature("heartbeat") or mailbox is None or mailbox.mail is None:
             return
         a = self.cfg.assistant
         fmt = lambda ts: datetime.fromtimestamp(ts, self.cfg.tz).strftime("%Y-%m-%d %H:%M") if ts else "never"
@@ -250,11 +263,11 @@ class Bridge:
             f"Time: {fmt(time.time())}\n"
             f"{a.name} enabled: {'yes' if self.settings.feature('mia_enabled') else 'no'}\n"
             f"Last chat.db read: {fmt(self.last_chatdb_read)}\n"
-            f"Last inbox poll: {fmt(self.poller.last_ok)}\n"
+            f"Last inbox poll: {fmt(mailbox.last_ok)}\n"
             f"Open tasks: {self.store.open_task_count()}\n"
             + ("\nNot healthy:\n" + "\n".join(f"- {u}" for u in unhealthy) + "\n" if unhealthy else "")
         )
-        self._send_mail(f"[{a.tag}-HEARTBEAT] {fmt(time.time())}", body)
+        mailbox.send(f"[{a.tag}-HEARTBEAT] {fmt(time.time())}", body)
 
     def create_dashboard(self):
         return create_app(self.settings, self.store, self.dashboard_password, self.cfg.tz, self.cfg.shadow_mode,
@@ -268,11 +281,12 @@ class Bridge:
         for t in self.transports:
             threading.Thread(target=self._watch, args=(t,), name=f"watch-{t.name}", daemon=True).start()
         self._every(5, self.outbound.tick, "outbound")
-        if self.graph is not None:
-            self._every(g.poll_seconds, self.poller.poll_once, "inbox-poll", self.h_mail)
-            if g.calendars:
-                self._every(g.calendar_refresh_minutes * 60, self._refresh_calendar, "calendar", self.h_calendar)
+        if self.tasks.health.state != "failed" and self.tasks.name != "none":
+            self._every(g.poll_seconds, self.tasks.poll, "task-poll", self.tasks.health)
+        if self.tasks.name == "mailbox":
             self._every(3600, self._heartbeat, "heartbeat")
+        if self.graph is not None and g.calendars:
+            self._every(g.calendar_refresh_minutes * 60, self._refresh_calendar, "calendar", self.h_calendar)
         self._every(6 * 3600, self._prune, "prune")
 
     def run(self) -> None:
