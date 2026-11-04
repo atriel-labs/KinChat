@@ -1,0 +1,47 @@
+# Copy to ~/Library/Application Support/mia-bridge/config.yaml (scripts/install.sh does this).
+# Infrastructure only: contacts, chats and feature toggles live in the dashboard.
+# Secrets are NOT in this file; they come from the Keychain (see README).
+
+# Log routing decisions and draft replies without sending anything. Leave on for 2-3 days, then set false.
+shadow_mode: true
+
+messages:
+  chat_db: ~/Library/Messages/chat.db
+  poll_seconds: 2
+
+routing:
+  window_minutes: 12
+  respond_threshold: 0.75
+  not_for_mia_threshold: 0.80
+  quiet_minutes: 60
+  history_messages: 20
+
+replier:
+  model_router: claude-haiku-5-5
+  model_reply: claude-sonnet-5-5
+  router_effort: low
+  reply_effort: low
+  reply_history_messages: 30
+  max_msgs_per_10min: 6
+  timeout_s: 15
+  fallbacks: true          # server-side refusal fallback on the reply model
+
+dashboard:
+  bind: 127.0.0.1
+  port: 8770
+
+quiet_hours:               # used when the "Quiet hours" toggle is on
+  start: 22
+  end: 7
+
+graph:
+  tenant: example.com            # your Entra tenant domain
+  client_id: "00000000-0000-0000-0000-000000000000"   # "Mia Bridge" app registration
+  cert_thumbprint: "HEX_SHA1_THUMBPRINT"
+  mailbox: mia@example.com
+  calendars: [you@example.com, mia@example.com]
+  poll_seconds: 30
+  calendar_refresh_minutes: 15
+  calendar_days: 14
+
+timezone: America/Denver
