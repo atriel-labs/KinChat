@@ -1,9 +1,9 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from mia_bridge.outbound import Outbound
-
 from conftest import CHAT, DM_ALEX
+
+from mia_bridge.outbound import Outbound
 
 TZ = ZoneInfo("America/Denver")
 

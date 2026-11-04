@@ -4,8 +4,8 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from .config import Config
 from .llm import Classification

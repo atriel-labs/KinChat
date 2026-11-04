@@ -1,7 +1,7 @@
+from conftest import ALEX
+
 from mia_bridge.graph import _format_event, _owned_event
 from mia_bridge.settings import norm_handle
-
-from conftest import ALEX
 
 
 def test_foreign_number_with_same_last_digits_is_not_wes(settings):

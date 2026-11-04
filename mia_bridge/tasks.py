@@ -5,9 +5,9 @@ import json
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Callable
+from datetime import UTC, datetime, timedelta
 
 from .config import Config
 from .llm import TaskRequest, format_transcript
@@ -133,7 +133,7 @@ class ResultPoller:
 
     def poll_once(self) -> int:
         delta = self.store.kv_get("inbox_delta_link")
-        since = datetime.now(timezone.utc) - timedelta(days=1)
+        since = datetime.now(UTC) - timedelta(days=1)
         items, next_link = self.graph.inbox_delta(delta, since)
         posted = 0
         for item in items:

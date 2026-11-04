@@ -5,8 +5,8 @@ import logging
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from datetime import datetime
-from typing import Callable
 from zoneinfo import ZoneInfo
 
 from .settings import Settings
