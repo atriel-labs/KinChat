@@ -48,7 +48,9 @@ Review 2–3 days, tune thresholds, then set it to `false` and restart.
 
 **Upgrading from mia-bridge:** an existing `~/Library/Application Support/mia-bridge/` directory, Keychain
 items under `ai.atriel.mia-bridge` and `MIA_BRIDGE_*` environment variables are still found, so a live install
-keeps working. `scripts/install.sh` replaces the old `ai.atriel.mia-bridge` launchd agent with `io.kinchat.bridge`.
+keeps working. `scripts/install.sh` stops the old `ai.atriel.mia-bridge` launchd agent, moves its plist aside to
+`ai.atriel.mia-bridge.plist.disabled` and loads `io.kinchat.bridge`. To roll back in one command:
+`launchctl bootout gui/$(id -u)/io.kinchat.bridge; mv ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist.disabled ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist`
 
 ## Dashboard rules
 

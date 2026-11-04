@@ -29,10 +29,12 @@ fi
 sed -e "s|__VENV__|$PROJECT/.venv|g" -e "s|__PROJECT__|$PROJECT|g" -e "s|__HOME__|$HOME|g" \
   "$PROJECT/launchd/$LABEL.plist.template" > "$PLIST"
 
-# Stop and remove the agent from before the rename so two bridges never run at once.
+# Stop the agent from before the rename so two bridges never run at once, and keep its plist for rollback.
 if [[ -f "$LEGACY_PLIST" ]]; then
   launchctl bootout "gui/$(id -u)" "$LEGACY_PLIST" 2>/dev/null || true
-  rm -f "$LEGACY_PLIST"
+  mv -f "$LEGACY_PLIST" "$LEGACY_PLIST.disabled"
+  echo "Stopped the old ai.atriel.mia-bridge agent. To roll back to it:"
+  echo "  launchctl bootout gui/\$(id -u)/$LABEL; mv ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist.disabled ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist; launchctl bootstrap gui/\$(id -u) ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist"
 fi
 
 launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || true
