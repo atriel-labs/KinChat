@@ -74,6 +74,19 @@ class Graph:
 
 
 @dataclass
+class Assistant:
+    name: str = "Mia"
+    aliases: list[str] = field(default_factory=list)  # other names that count as addressing the assistant
+    owner: str = "the family organizer"  # who reviews suggested notes, as the reply prompt refers to them
+    tag: str = "MIA"  # email subject tags: [MIA-CHAT], [MIA-POST], [MIA-HEARTBEAT]
+    handles: list[str] = field(default_factory=list)  # the assistant's own iMessage addresses
+
+    @property
+    def names(self) -> list[str]:
+        return [n for n in [self.name, *self.aliases] if n and n.strip()]
+
+
+@dataclass
 class Config:
     messages: Messages = field(default_factory=Messages)
     routing: Routing = field(default_factory=Routing)
@@ -81,6 +94,7 @@ class Config:
     dashboard: Dashboard = field(default_factory=Dashboard)
     quiet_hours: QuietHours = field(default_factory=QuietHours)
     graph: Graph = field(default_factory=Graph)
+    assistant: Assistant = field(default_factory=Assistant)
     timezone: str = "America/Denver"
     shadow_mode: bool = True
     family_md: Path = APP_DIR / "family.md"
@@ -106,11 +120,19 @@ def load(path: Path) -> Config:
         dashboard=_section(Dashboard, raw.get("dashboard")),
         quiet_hours=_section(QuietHours, raw.get("quiet_hours")),
         graph=_section(Graph, raw.get("graph")),
+        assistant=_section(Assistant, raw.get("assistant")),
         timezone=raw.get("timezone", "America/Denver"),
         shadow_mode=bool(raw.get("shadow_mode", True)),
     )
     if cfg.dashboard.bind not in ("127.0.0.1", "localhost", "::1"):
         raise ValueError("config: dashboard.bind must be a loopback address")
+    a = cfg.assistant
+    if not a.name.strip() or not a.tag.strip():
+        raise ValueError("config: assistant.name and assistant.tag must not be empty")
+    a.aliases, a.handles = list(a.aliases or []), list(a.handles or [])
+    if not a.handles and cfg.graph.mailbox:
+        # Configs from before assistant.handles: the mailbox doubled as the assistant's iMessage address.
+        a.handles = [cfg.graph.mailbox]
     if raw.get("family_md"):
         cfg.family_md = Path(raw["family_md"]).expanduser()
     if raw.get("db_path"):

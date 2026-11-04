@@ -61,7 +61,7 @@ def test_stranger_added_to_approved_group_sends_it_back_to_pending(cfg, store, s
 
 
 def test_mia_own_handle_is_not_a_stranger(cfg, store, settings):
-    cfg.graph.mailbox = "mia@example.com"  # the bridge's own handle; becomes assistant.handles in Phase 1
+    cfg.assistant.handles = ["mia@example.com"]  # the bridge's own iMessage address
     r, _ = make(cfg, store, settings, cls(), members=("+13035550100", SAM, "mia@example.com"))
     assert r.route(incoming("Mia, hi")).respond
 

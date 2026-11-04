@@ -2,7 +2,7 @@
 
 Reading chat.db needs Full Disk Access for the Python binary the launchd agent runs;
 sending needs Automation permission to control Messages. Both are granted once,
-logged in as the Mia macOS user.
+logged in as the assistant's macOS user.
 """
 from __future__ import annotations
 

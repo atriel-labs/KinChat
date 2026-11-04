@@ -1,4 +1,4 @@
-"""Everything Mia posts goes through here: dashboard checks, quiet hours, rate limit, shadow mode."""
+"""Everything the assistant posts goes through here: dashboard checks, quiet hours, rate limit, shadow mode."""
 from __future__ import annotations
 
 import logging

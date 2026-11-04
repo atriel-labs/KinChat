@@ -1,7 +1,8 @@
 # KinChat
 A Claude-powered assistant for your family’s iMessage group chat. Answers in seconds, hands real tasks to an agent, and runs on a Mac you own with no incoming connections.
 
-> **Status:** being prepared for open source. The assistant is still called Mia by default; the name becomes configurable next.
+> **Status:** being prepared for open source. The assistant is called Mia by default; set `assistant.name`,
+> `aliases`, `tag` and `handles` in `config.yaml` to give it another name (see `config.example.yaml`).
 
 Puts Mia in the family iMessage group. The bridge reads new messages straight from the Messages
 database (`chat.db`), routes each one (Claude Haiku), replies instantly (Claude Sonnet) by scripting

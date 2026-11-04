@@ -15,13 +15,13 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask, abort, redirect, render_template_string, request, session, url_for
 
-from .settings import CHAT_MODES, FEATURES, Notes, Settings
+from .settings import CHAT_MODES, FEATURES, Notes, Settings, feature_rows
 from .store import Store
 
 LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 
 PAGE = """<!doctype html>
-<html><head><meta charset="utf-8"><title>Mia bridge</title>
+<html><head><meta charset="utf-8"><title>{{ name }} bridge</title>
 <style>
  body{font:15px/1.4 -apple-system,system-ui,sans-serif;max-width:980px;margin:24px auto;padding:0 16px;color:#1d1d1f;background:#fff}
  h1{font-size:22px} h2{font-size:17px;margin-top:32px;border-bottom:1px solid #ddd;padding-bottom:4px}
@@ -31,7 +31,7 @@ PAGE = """<!doctype html>
  form.inline{display:inline} button{cursor:pointer}
 </style></head><body>
 <form method="post" action="{{ url_for('logout') }}" style="float:right"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Sign out</button></form>
-<h1>Mia bridge</h1>
+<h1>{{ name }} bridge</h1>
 {% if shadow %}<p class="banner">Shadow mode is on in config.yaml: decisions are logged, nothing is sent.</p>{% endif %}
 
 <h2>Feature toggles</h2>
@@ -43,7 +43,7 @@ PAGE = """<!doctype html>
 <p><button>Save toggles</button></p></form>
 
 <h2>Suggested notes{% if notes %} ({{ notes|length }}){% endif %}</h2>
-<p class="muted">Facts Mia picked up in chat. Approving adds the line to family.md (you can edit the wording first); rejecting discards it. Unreviewed suggestions are deleted after 30 days.</p>
+<p class="muted">Facts {{ name }} picked up in chat. Approving adds the line to family.md (you can edit the wording first); rejecting discards it. Unreviewed suggestions are deleted after 30 days.</p>
 <table><tr><th>Note</th><th>From</th><th>When</th><th></th></tr>
 {% for n in notes %}
 <tr><form method="post" action="{{ url_for('decide_note', note_id=n.id) }}"><input type="hidden" name="csrf" value="{{ csrf }}">
@@ -71,7 +71,7 @@ PAGE = """<!doctype html>
 </table>
 
 <h2>Approved chats</h2>
-<p class="muted">Group chats that add Mia appear here as Pending until you choose a mode. Respond: Mia takes part. Listen only: logs context, never speaks. Off: ignored.</p>
+<p class="muted">Group chats that add {{ name }} appear here as Pending until you choose a mode. Respond: {{ name }} takes part. Listen only: logs context, never speaks. Off: ignored.</p>
 <table><tr><th>Chat</th><th>Participants</th><th>Chat ID</th><th>Mode</th></tr>
 {% for ch in chats %}
 <tr class="{{ 'pending' if ch.mode == 'pending' else '' }}"><td>{{ ch.name or '(unnamed group)' }}</td>
@@ -86,7 +86,7 @@ PAGE = """<!doctype html>
 <h2>Recent routing decisions</h2>
 <table><tr><th>Time</th><th>Step</th><th>Route</th><th>Classifier</th><th>Confidence</th><th>Intent</th><th>Reason</th></tr>
 {% for d in decisions %}<tr><td class="muted">{{ fmt(d.ts) }}</td><td>{{ d.step }}</td><td>{{ d.route }}</td>
-<td>{{ '' if d.cls_route is none else ('for Mia' if d.cls_route else 'not for Mia') }}</td>
+<td>{{ '' if d.cls_route is none else ('for ' ~ name if d.cls_route else 'not for ' ~ name) }}</td>
 <td>{{ '%.2f'|format(d.confidence) if d.confidence is not none else '' }}</td><td>{{ d.intent or '' }}</td>
 <td>{{ d.reason }}{% if d.cls_reason and d.cls_reason != d.reason %}<br><span class="muted">Classifier: {{ d.cls_reason }}</span>{% endif %}</td></tr>
 {% else %}<tr><td colspan="7" class="muted">None yet.</td></tr>{% endfor %}</table>
@@ -97,9 +97,9 @@ PAGE = """<!doctype html>
 {% else %}<tr><td colspan="5" class="muted">No changes yet.</td></tr>{% endfor %}</table>
 </body></html>"""
 
-LOGIN = """<!doctype html><html><head><meta charset="utf-8"><title>Mia bridge</title>
+LOGIN = """<!doctype html><html><head><meta charset="utf-8"><title>{{ name }} bridge</title>
 <style>body{font:15px -apple-system,system-ui,sans-serif;max-width:320px;margin:80px auto;padding:0 16px;background:#fff;color:#1d1d1f}</style></head>
-<body><h1>Mia bridge</h1>{% if error %}<p style="color:#b00">Wrong password.</p>{% endif %}
+<body><h1>{{ name }} bridge</h1>{% if error %}<p style="color:#b00">Wrong password.</p>{% endif %}
 <form method="post"><input type="password" name="password" autofocus required style="width:100%">
 <p><button>Sign in</button></p></form></body></html>"""
 
@@ -107,7 +107,7 @@ MODE_LABELS = {"respond": "Respond", "listen": "Listen only", "off": "Off", "pen
 
 
 def create_app(settings: Settings, store: Store, password: str, tz: ZoneInfo, shadow: bool,
-               notes: Notes | None = None) -> Flask:
+               notes: Notes | None = None, assistant: str = "Mia") -> Flask:
     app = Flask("kinchat-dashboard")
     app.secret_key = os.urandom(32)
     app.config.update(SESSION_COOKIE_SAMESITE="Strict", SESSION_COOKIE_HTTPONLY=True)
@@ -141,7 +141,7 @@ def create_app(settings: Settings, store: Store, password: str, tz: ZoneInfo, sh
                 return redirect(url_for("index"))
             time.sleep(1)
             error = True
-        return render_template_string(LOGIN, error=error)
+        return render_template_string(LOGIN, error=error, name=assistant)
 
     @app.post("/logout")
     def logout():
@@ -151,10 +151,10 @@ def create_app(settings: Settings, store: Store, password: str, tz: ZoneInfo, sh
     @app.get("/")
     def index():
         return render_template_string(
-            PAGE, csrf=session["csrf"], shadow=shadow, features=FEATURES, state=settings.features(),
+            PAGE, csrf=session["csrf"], shadow=shadow, features=feature_rows(assistant), state=settings.features(),
             contacts=settings.contacts(), chats=settings.chats(), modes=CHAT_MODES, mode_labels=MODE_LABELS,
             decisions=store.recent_decisions(30), audit=settings.audit_log(100), fmt=fmt,
-            notes=notes.pending() if notes else [])
+            notes=notes.pending() if notes else [], name=assistant)
 
     @app.post("/notes/<int:note_id>")
     def decide_note(note_id: int):

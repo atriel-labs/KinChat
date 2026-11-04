@@ -2,6 +2,15 @@
 # Infrastructure only: contacts, chats and feature toggles live in the dashboard.
 # Secrets are NOT in this file; they come from the Keychain (see README).
 
+# Who the assistant is. The name and aliases are what the family calls it in chat; they're matched as whole
+# words, case-insensitively. tag prefixes the task emails: [MIA-CHAT], [MIA-POST], [MIA-HEARTBEAT].
+assistant:
+  name: Mia
+  aliases: []                    # e.g. [Mimi]
+  owner: the family organizer    # who reviews suggested notes, as the assistant refers to them
+  tag: MIA
+  handles: [mia@example.com]     # the assistant's own iMessage addresses (never treated as a stranger in a group)
+
 # Log routing decisions and draft replies without sending anything. Leave on for 2-3 days, then set false.
 shadow_mode: true
 

@@ -12,17 +12,24 @@ from pathlib import Path
 
 from .store import Store
 
-# key, label, default, what happens when off
+# key, label, default, what happens when off. {name} is the assistant's name (see feature_rows).
 FEATURES = [
-    ("mia_enabled", "Mia enabled (master switch)", True, "Bridge reads and logs, never replies or creates tasks"),
+    ("mia_enabled", "{name} enabled (master switch)", True, "Bridge reads and logs, never replies or creates tasks"),
     ("instant_replies", "Instant replies", True, "No chat replies; tasks still go to Duet with a short acknowledgement"),
-    ("task_handoff", "Task handoff to Duet", True, "Mia chats but creates no tasks"),
-    ("followups", "Follow-ups without her name", True, "Mia responds only when named or replied to inline"),
-    ("one_on_one", "One-on-one chats", False, "Mia ignores direct messages, even from approved contacts"),
+    ("task_handoff", "Task handoff to Duet", True, "{name} chats but creates no tasks"),
+    ("followups", "Follow-ups without naming {name}", True, "{name} responds only when named or replied to inline"),
+    ("one_on_one", "One-on-one chats", False, "{name} ignores direct messages, even from approved contacts"),
     ("quiet_hours", "Quiet hours (10 PM–7 AM)", True, "Replies are held until 7 AM unless marked urgent"),
     ("heartbeat", "Hourly heartbeat email", True, "No health email; Duet can't detect an outage"),
-    ("note_suggestions", "Suggested notes", True, "Mia doesn't suggest facts for family.md"),
+    ("note_suggestions", "Suggested notes", True, "{name} doesn't suggest facts for family.md"),
 ]
+
+
+def feature_rows(name: str = "Mia") -> list[tuple[str, str, bool, str]]:
+    """FEATURES with labels filled in for display."""
+    return [(key, label.format(name=name), default, off.format(name=name)) for key, label, default, off in FEATURES]
+
+
 CHAT_MODES = ("respond", "listen", "off", "pending")
 
 
@@ -189,7 +196,7 @@ class Note:
 
 
 class Notes:
-    """Suggested family.md notes: Mia proposes, the owner approves or rejects in the dashboard."""
+    """Suggested family.md notes: the assistant proposes, the owner approves or rejects in the dashboard."""
 
     def __init__(self, store: Store, settings: Settings, family_md: Path):
         self._s = store

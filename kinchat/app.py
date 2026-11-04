@@ -33,7 +33,7 @@ class Bridge:
         self.chatdb = ChatDB(cfg.messages.chat_db)
         rp = cfg.replier
         self.llm = LLM(secrets.anthropic_api_key(), rp.model_router, rp.model_reply, rp.router_effort,
-                       rp.reply_effort, rp.timeout_s, rp.fallbacks)
+                       rp.reply_effort, rp.timeout_s, rp.fallbacks, cfg.assistant.name, cfg.assistant.owner)
         g = cfg.graph
         self.graph = Graph(g.tenant, g.client_id, g.cert_thumbprint, secrets.graph_cert_private_key(),
                            g.mailbox, cfg.timezone)
@@ -133,16 +133,17 @@ class Bridge:
     def _heartbeat(self) -> None:
         if self.cfg.shadow_mode or not self.settings.feature("heartbeat"):
             return
+        a = self.cfg.assistant
         fmt = lambda ts: datetime.fromtimestamp(ts, self.cfg.tz).strftime("%Y-%m-%d %H:%M") if ts else "never"
         body = (
             f"kinchat on {socket.gethostname()} is running.\n\n"
             f"Time: {fmt(time.time())}\n"
-            f"Mia enabled: {'yes' if self.settings.feature('mia_enabled') else 'no'}\n"
+            f"{a.name} enabled: {'yes' if self.settings.feature('mia_enabled') else 'no'}\n"
             f"Last chat.db read: {fmt(self.last_chatdb_read)}\n"
             f"Last inbox poll: {fmt(self.poller.last_ok)}\n"
             f"Open tasks: {self.store.open_task_count()}\n"
         )
-        self.graph.send_to_self(f"[MIA-HEARTBEAT] {fmt(time.time())}", body)
+        self.graph.send_to_self(f"[{a.tag}-HEARTBEAT] {fmt(time.time())}", body)
 
     def run(self) -> None:
         log.info("starting kinchat (shadow_mode=%s)", self.cfg.shadow_mode)
@@ -153,5 +154,5 @@ class Bridge:
         self._every(3600, self._heartbeat, "heartbeat")
         self._every(6 * 3600, self._prune, "prune")
         app = create_app(self.settings, self.store, self.dashboard_password, self.cfg.tz, self.cfg.shadow_mode,
-                         self.notes)
+                         self.notes, assistant=self.cfg.assistant.name)
         app.run(host=self.cfg.dashboard.bind, port=self.cfg.dashboard.port, threaded=True)
