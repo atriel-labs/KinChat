@@ -82,6 +82,10 @@ keeps working. `scripts/install.sh` stops the old `ai.atriel.mia-bridge` launchd
 - **Chat transports:** chat IDs are namespaced `<transport>:<native id>` (e.g. `imessage:iMessage;+;chat123`), and
   replies go out through the transport named by the prefix. `chat.transports` picks the transports (default
   `[imessage]`). An existing `state.db` is upgraded in place by prefixing its stored IDs with `imessage:`.
+- **Task mail over IMAP:** with `tasks.mail: imap` the bridge sends task mail by SMTP and reads `[MIA-POST]` results
+  only from the account's Sent folder (forged mail lands in the Inbox, never read). Each result is posted once per
+  `(UIDVALIDITY, UID)`; `Authentication-Results` is logged, never trusted. The app password is the Keychain
+  account `imap-app-password`.
 - **Restart:** the last processed `chat.db` row is saved; messages more than 5 minutes old when first seen
   are stored for context but not answered. The first run starts from the newest row, not from history.
 - **Results** post to the chat the task came from, never another chat; no STATUS line keeps the task open.

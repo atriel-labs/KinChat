@@ -145,13 +145,25 @@ class Bridge:
         if t.backend == "none":
             return NoTaskBackend()
         from .backends.mailbox import MailboxBackend
-        mail = None
-        if self.graph is not None:
+        mail, error = None, None
+        if t.mail == "imap":
+            from .backends.mail_imap import ImapMail
+            missing = [k for k in ("host", "username") if not getattr(self.cfg.imap, k)]
+            if missing:
+                error = f"imap not configured (missing {', '.join(missing)})"
+            else:
+                try:
+                    mail = ImapMail(self.cfg.imap, secrets.imap_app_password(), self.store)
+                except Exception as e:
+                    error = f"{type(e).__name__}: {e}"
+        elif self.graph is not None:
             from .backends.mail_graph import GraphMail
             mail = GraphMail(self.graph, self.store)
+        else:
+            error = self.graph_error
         backend = MailboxBackend(self.cfg, self.store, mail, self.outbound.post)
         if mail is None:
-            backend.health.failed(self.graph_error or "no mail transport")
+            backend.health.failed(error or "no mail transport")
         else:
             backend.health.degraded("inbox not polled yet")
         return backend
@@ -282,7 +294,8 @@ class Bridge:
             threading.Thread(target=self._watch, args=(t,), name=f"watch-{t.name}", daemon=True).start()
         self._every(5, self.outbound.tick, "outbound")
         if self.tasks.health.state != "failed" and self.tasks.name != "none":
-            self._every(g.poll_seconds, self.tasks.poll, "task-poll", self.tasks.health)
+            every = g.poll_seconds if self.cfg.tasks.mail == "graph" else self.cfg.tasks.poll_seconds
+            self._every(every, self.tasks.poll, "task-poll", self.tasks.health)
         if self.tasks.name == "mailbox":
             self._every(3600, self._heartbeat, "heartbeat")
         if self.graph is not None and g.calendars:

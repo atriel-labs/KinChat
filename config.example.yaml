@@ -23,7 +23,20 @@ messages:                  # the imessage transport
 
 tasks:
   backend: mailbox         # mailbox: email tasks to an agent ([MIA-CHAT] out, [MIA-POST] back); none: no tasks
-  mail: graph              # mailbox only: how mail is sent and read
+  mail: graph              # mailbox only: graph (Microsoft 365, see graph: below) or imap (see imap: below)
+  poll_seconds: 30         # imap only; graph uses graph.poll_seconds
+
+# Only for tasks.mail: imap. The app password is in the Keychain (account imap-app-password).
+# Results are read ONLY from sent_folder: the agent sends them as this account, so a genuine result is always
+# in Sent, while anyone can put mail (with any headers) in the Inbox.
+# imap:
+#   host: imap.example.com
+#   port: 993
+#   username: assistant@example.com
+#   address: assistant@example.com
+#   sent_folder: Sent            # Gmail: "[Gmail]/Sent Mail"
+#   smtp_host: smtp.example.com
+#   smtp_port: 587               # 587 = STARTTLS, 465 = TLS
 
 routing:
   window_minutes: 12

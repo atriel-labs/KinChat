@@ -90,3 +90,16 @@ def test_none_task_backend(no_secrets, bare_cfg):
     assert bridge.tasks.name == "none" and not bridge.tasks.accepts_tasks
     bridge._heartbeat()  # no heartbeat without the mailbox backend
     assert "mail" not in {s.name for s in bridge.health.snapshot()}
+
+
+def test_imap_mail_selected_from_config(no_secrets, bare_cfg, monkeypatch):
+    bare_cfg.tasks.mail = "imap"
+    bridge = Bridge(bare_cfg)
+    assert bridge.tasks.health.state == "failed" and "imap not configured" in bridge.tasks.health.status.last_error
+    bare_cfg.imap.host, bare_cfg.imap.username = "imap.example.com", "assistant@example.com"
+    bridge = Bridge(bare_cfg)
+    assert "imap-app-password" in bridge.tasks.health.status.last_error  # the Keychain secret is missing
+    monkeypatch.setenv("KINCHAT_IMAP_APP_PASSWORD", "pw")
+    bridge = Bridge(bare_cfg)
+    assert bridge.tasks.mail.name == "imap" and bridge.tasks.mail.address == "assistant@example.com"
+    assert bridge.tasks.health.state == "degraded"  # configured, not polled yet

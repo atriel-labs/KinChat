@@ -14,7 +14,7 @@ from .settings import CALLING_CODES
 _LIBRARY = Path.home() / "Library"
 
 TASK_BACKENDS = ("mailbox", "none")
-MAIL_TRANSPORTS = ("graph",)
+MAIL_TRANSPORTS = ("graph", "imap")
 
 
 def _valid_zone(name: str | None) -> str | None:
@@ -71,7 +71,19 @@ class Chat:
 @dataclass
 class Tasks:
     backend: str = "mailbox"  # mailbox or none
-    mail: str = "graph"       # mailbox only: graph
+    mail: str = "graph"       # mailbox only: graph or imap
+    poll_seconds: int = 30    # how often results are fetched (imap; graph uses graph.poll_seconds)
+
+
+@dataclass
+class Imap:
+    host: str = ""
+    port: int = 993
+    username: str = ""
+    address: str = ""          # the assistant's address; defaults to username
+    sent_folder: str = "Sent"  # results are read only from here, e.g. "[Gmail]/Sent Mail"
+    smtp_host: str = ""        # defaults to host
+    smtp_port: int = 587       # 587 = STARTTLS, 465 = TLS
 
 
 @dataclass
@@ -138,6 +150,7 @@ class Config:
     messages: Messages = field(default_factory=Messages)
     chat: Chat = field(default_factory=Chat)
     tasks: Tasks = field(default_factory=Tasks)
+    imap: Imap = field(default_factory=Imap)
     routing: Routing = field(default_factory=Routing)
     replier: Replier = field(default_factory=Replier)
     dashboard: Dashboard = field(default_factory=Dashboard)
@@ -167,6 +180,7 @@ def load(path: Path) -> Config:
         messages=_section(Messages, raw.get("messages")),
         chat=_section(Chat, raw.get("chat")),
         tasks=_section(Tasks, raw.get("tasks")),
+        imap=_section(Imap, raw.get("imap")),
         routing=_section(Routing, raw.get("routing")),
         replier=_section(Replier, raw.get("replier")),
         dashboard=_section(Dashboard, raw.get("dashboard")),
