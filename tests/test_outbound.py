@@ -5,7 +5,7 @@ from conftest import CHAT, DM_ALEX
 
 from kinchat.outbound import Outbound, PostStatus
 
-TZ = ZoneInfo("America/Denver")
+TZ = ZoneInfo("America/New_York")
 
 
 class Clock:

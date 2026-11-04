@@ -28,9 +28,9 @@ def test_config_defaults_to_system_zone_and_us(tmp_path, monkeypatch):
     p.write_text("shadow_mode: true\n")
     cfg = config_mod.load(p)
     assert cfg.timezone == "Europe/Berlin" and cfg.default_country == "US"
-    p.write_text("timezone: America/Denver\ndefault_country: gb\n")
+    p.write_text("timezone: America/New_York\ndefault_country: gb\n")
     cfg = config_mod.load(p)
-    assert cfg.timezone == "America/Denver" and cfg.default_country == "GB"
+    assert cfg.timezone == "America/New_York" and cfg.default_country == "GB"
 
 
 @pytest.mark.parametrize("yaml", ["default_country: FR\n", "timezone: Mars/Olympus\n"])

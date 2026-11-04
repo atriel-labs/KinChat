@@ -65,7 +65,7 @@ def test_unreviewed_notes_pruned_with_chat_history(notes, store):
 
 
 def test_dashboard_approve_and_reject(store, settings, notes, family_md):
-    client = create_app(settings, store, "pw", ZoneInfo("America/Denver"), False, notes).test_client()
+    client = create_app(settings, store, "pw", ZoneInfo("America/New_York"), False, notes).test_client()
     client.post("/login", data={"password": "pw"}, base_url=BASE)
     page = client.get("/", base_url=BASE).get_data(as_text=True)
     csrf = re.search(r'name="csrf" value="([^"]+)"', page).group(1)

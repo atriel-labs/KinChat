@@ -15,7 +15,7 @@ from kinchat.settings import feature_rows
 from kinchat.store import Message
 from kinchat.tasks import POST_SUBJECT_RE, accept_result, post_subject_re
 
-TZ = ZoneInfo("America/Denver")
+TZ = ZoneInfo("America/New_York")
 BASE = "http://127.0.0.1:8770"
 
 

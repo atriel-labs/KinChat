@@ -11,7 +11,7 @@ BASE = "http://127.0.0.1:8770"
 
 @pytest.fixture
 def client(settings, store):
-    app = create_app(settings, store, "hunter2", ZoneInfo("America/Denver"), shadow=False)
+    app = create_app(settings, store, "hunter2", ZoneInfo("America/New_York"), shadow=False)
     return app.test_client()
 
 
