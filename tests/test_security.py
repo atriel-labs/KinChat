@@ -44,17 +44,17 @@ def test_event_text_is_flattened_and_capped():
 def test_gb_national_numbers(store):
     from kinchat.settings import Settings
     s = Settings(store, default_country="GB")
-    s.add_contact("Jo", ["07700 900123"], one_on_one=False, can_assign=True)
-    assert s.contact_for_handle("+44 7700 900123").name == "Jo"
-    assert s.contact_for_handle("0044 7700 900123").name == "Jo"
-    assert s.contact_for_handle("+1 7700900123") is None
-    assert s.contact_for_handle("+61 7700 900123") is None
-    assert norm_handle("07700 900123", "GB") == "447700900123"
+    s.add_contact("Jo", ["020 5550 0100"], one_on_one=False, can_assign=True)
+    assert s.contact_for_handle("+44 20 5550 0100").name == "Jo"
+    assert s.contact_for_handle("0044 20 5550 0100").name == "Jo"
+    assert s.contact_for_handle("+1 2055500100") is None
+    assert s.contact_for_handle("+61 20 5550 0100") is None
+    assert norm_handle("020 5550 0100", "GB") == "442055500100"
 
 
 def test_other_country_tables():
-    assert norm_handle("0412 345 678", "AU") == "61412345678"
-    assert norm_handle("021 123 4567", "NZ") == "64211234567"
-    assert norm_handle("030 1234567", "DE") == "49301234567"
-    assert norm_handle("613-555-0100", "CA") == "16135550100"
+    assert norm_handle("02 5550 0101", "AU") == "61255500101"
+    assert norm_handle("09 555 0102", "NZ") == "6495550102"
+    assert norm_handle("030 5550103", "DE") == "49305550103"
+    assert norm_handle("613-555-0104", "CA") == "16135550104"
     assert norm_handle("+44 20 7946 0958", "AU") == "442079460958"  # "+" always passes through
