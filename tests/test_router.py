@@ -2,7 +2,7 @@ import time
 
 from conftest import CHAT, DM_ALEX, SAM, cls, incoming
 
-from mia_bridge.router import BACK_ACK, SIT_OUT_ACK, Router
+from kinchat.router import BACK_ACK, SIT_OUT_ACK, Router
 
 
 class FakeClassifier:

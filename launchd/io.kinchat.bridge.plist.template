@@ -3,12 +3,12 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>ai.atriel.mia-bridge</string>
+    <string>io.kinchat.bridge</string>
     <key>ProgramArguments</key>
     <array>
         <string>__VENV__/bin/python</string>
         <string>-m</string>
-        <string>mia_bridge</string>
+        <string>kinchat</string>
         <string>run</string>
     </array>
     <key>WorkingDirectory</key>
@@ -20,8 +20,8 @@
     <key>ThrottleInterval</key>
     <integer>10</integer>
     <key>StandardOutPath</key>
-    <string>__HOME__/Library/Logs/mia-bridge/launchd.out.log</string>
+    <string>__HOME__/Library/Logs/kinchat/launchd.out.log</string>
     <key>StandardErrorPath</key>
-    <string>__HOME__/Library/Logs/mia-bridge/launchd.err.log</string>
+    <string>__HOME__/Library/Logs/kinchat/launchd.err.log</string>
 </dict>
 </plist>

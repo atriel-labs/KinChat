@@ -2,8 +2,8 @@ import json
 
 from conftest import CHAT
 
-from mia_bridge.llm import TaskRequest
-from mia_bridge.tasks import ResultPoller, TaskDesk, accept_result, parse_result_body
+from kinchat.llm import TaskRequest
+from kinchat.tasks import ResultPoller, TaskDesk, accept_result, parse_result_body
 
 MIA = "mia@example.com"
 

@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import CHAT
 
-from mia_bridge.dashboard import create_app
+from kinchat.dashboard import create_app
 
 BASE = "http://127.0.0.1:8770"
 

@@ -1,4 +1,4 @@
-# Copy to ~/Library/Application Support/mia-bridge/config.yaml (scripts/install.sh does this).
+# Copy to ~/Library/Application Support/kinchat/config.yaml (scripts/install.sh does this).
 # Infrastructure only: contacts, chats and feature toggles live in the dashboard.
 # Secrets are NOT in this file; they come from the Keychain (see README).
 

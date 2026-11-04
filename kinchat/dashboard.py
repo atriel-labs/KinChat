@@ -108,7 +108,7 @@ MODE_LABELS = {"respond": "Respond", "listen": "Listen only", "off": "Off", "pen
 
 def create_app(settings: Settings, store: Store, password: str, tz: ZoneInfo, shadow: bool,
                notes: Notes | None = None) -> Flask:
-    app = Flask("mia-bridge-dashboard")
+    app = Flask("kinchat-dashboard")
     app.secret_key = os.urandom(32)
     app.config.update(SESSION_COOKIE_SAMESITE="Strict", SESSION_COOKIE_HTTPONLY=True)
 

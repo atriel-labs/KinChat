@@ -1,6 +1,6 @@
 import sqlite3
 
-from mia_bridge.messages import APPLE_EPOCH, ChatDB, apple_ts, decode_attributed_body
+from kinchat.messages import APPLE_EPOCH, ChatDB, apple_ts, decode_attributed_body
 
 SCHEMA = """
 CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);

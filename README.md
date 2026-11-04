@@ -1,7 +1,7 @@
 # KinChat
 A Claude-powered assistant for your family’s iMessage group chat. Answers in seconds, hands real tasks to an agent, and runs on a Mac you own with no incoming connections.
 
-> **Status:** being prepared for open source. The code below is still the original `mia-bridge` package and will be renamed to `kinchat`; see the plan in the PR.
+> **Status:** being prepared for open source. The assistant is still called Mia by default; the name becomes configurable next.
 
 Puts Mia in the family iMessage group. The bridge reads new messages straight from the Messages
 database (`chat.db`), routes each one (Claude Haiku), replies instantly (Claude Sonnet) by scripting
@@ -9,7 +9,7 @@ Messages, hands real work to Mia in Duet by `[MIA-CHAT]` email, and posts `[MIA-
 A password-protected local dashboard controls who Mia talks to. Nothing listens beyond 127.0.0.1.
 
 ```
-mia_bridge/
+kinchat/
   messages.py   chat.db reader + AppleScript sender       router.py    dashboard rules → filters → controls → cues → window → classifier
   settings.py   features, contacts, chats, audit           outbound.py  can-speak check, quiet hours outbox, 6/10 min rate limit, shadow mode
   dashboard.py  Flask + plain HTML forms on 127.0.0.1:8770 tasks.py     [MIA-CHAT] handoff, [MIA-POST] acceptance rules
@@ -22,28 +22,32 @@ mia_bridge/
 1. **Mac account.** Log in as the dedicated `mia` macOS user. Sign in to Messages with the assistant's own Apple ID.
    Turn on FileVault and the firewall ("Block all incoming connections"), and disable sleep.
 2. **Install:** `scripts/install.sh`. It creates the venv, copies `config.yaml` and `family.md` into
-   `~/Library/Application Support/mia-bridge/`, loads the launchd agent `ai.atriel.mia-bridge`, and prints
+   `~/Library/Application Support/kinchat/`, loads the launchd agent `io.kinchat.bridge`, and prints
    the Python binary that needs Full Disk Access. The agent restarts repeatedly until steps 3–5 are done.
 3. **Permissions.** In System Settings → Privacy & Security → Full Disk Access, add the Python binary the
-   installer printed (needed to read `chat.db`). Then run `.venv/bin/python -m mia_bridge check` once from
+   installer printed (needed to read `chat.db`). Then run `.venv/bin/python -m kinchat check` once from
    Terminal and allow the "control Messages" Automation prompt.
 4. **Entra "Mia Bridge" app.** Certificate auth, `Mail.ReadWrite` / `Mail.Send` / `Calendars.Read`, scoped
    with Exchange RBAC for Applications, verified with `Test-ServicePrincipalAuthorization`.
    Put `graph.client_id` and `graph.cert_thumbprint` in `config.yaml`.
 5. **Secrets in the login Keychain:**
    ```
-   security add-generic-password -s ai.atriel.mia-bridge -a anthropic-api-key -w 'sk-ant-...'
-   security add-generic-password -s ai.atriel.mia-bridge -a dashboard-password -w '...'
-   security add-generic-password -s ai.atriel.mia-bridge -a graph-cert-key-b64 -w "$(base64 -i key.pem | tr -d '\n')"
+   security add-generic-password -s kinchat -a anthropic-api-key -w 'sk-ant-...'
+   security add-generic-password -s kinchat -a dashboard-password -w '...'
+   security add-generic-password -s kinchat -a graph-cert-key-b64 -w "$(base64 -i key.pem | tr -d '\n')"
    ```
-6. **Verify:** `.venv/bin/python -m mia_bridge check`, then `launchctl kickstart -k gui/$(id -u)/ai.atriel.mia-bridge`.
+6. **Verify:** `.venv/bin/python -m kinchat check`, then `launchctl kickstart -k gui/$(id -u)/io.kinchat.bridge`.
 7. **Dashboard:** open http://127.0.0.1:8770. Add the family members as contacts. From a family member's phone, start a
    group with the others and the assistant's Apple ID and send a message. The group appears under Approved chats as
    **Pending**; set it to **Respond**.
 
 `shadow_mode: true` in `config.yaml` is the default: decisions and draft replies are logged
-(`~/Library/Logs/mia-bridge/bridge.log`, and the dashboard's "Recent routing decisions") but nothing is sent.
+(`~/Library/Logs/kinchat/bridge.log`, and the dashboard's "Recent routing decisions") but nothing is sent.
 Review 2–3 days, tune thresholds, then set it to `false` and restart.
+
+**Upgrading from mia-bridge:** an existing `~/Library/Application Support/mia-bridge/` directory, Keychain
+items under `ai.atriel.mia-bridge` and `MIA_BRIDGE_*` environment variables are still found, so a live install
+keeps working. `scripts/install.sh` replaces the old `ai.atriel.mia-bridge` launchd agent with `io.kinchat.bridge`.
 
 ## Dashboard rules
 

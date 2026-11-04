@@ -135,7 +135,7 @@ class Bridge:
             return
         fmt = lambda ts: datetime.fromtimestamp(ts, self.cfg.tz).strftime("%Y-%m-%d %H:%M") if ts else "never"
         body = (
-            f"mia-bridge on {socket.gethostname()} is running.\n\n"
+            f"kinchat on {socket.gethostname()} is running.\n\n"
             f"Time: {fmt(time.time())}\n"
             f"Mia enabled: {'yes' if self.settings.feature('mia_enabled') else 'no'}\n"
             f"Last chat.db read: {fmt(self.last_chatdb_read)}\n"
@@ -145,7 +145,7 @@ class Bridge:
         self.graph.send_to_self(f"[MIA-HEARTBEAT] {fmt(time.time())}", body)
 
     def run(self) -> None:
-        log.info("starting mia-bridge (shadow_mode=%s)", self.cfg.shadow_mode)
+        log.info("starting kinchat (shadow_mode=%s)", self.cfg.shadow_mode)
         threading.Thread(target=self._watch_chatdb, name="chatdb", daemon=True).start()
         self._every(5, self.outbound.tick, "outbound")
         self._every(self.cfg.graph.calendar_refresh_minutes * 60, self._refresh_calendar, "calendar")

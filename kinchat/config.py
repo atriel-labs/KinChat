@@ -7,8 +7,18 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
-APP_DIR = Path.home() / "Library" / "Application Support" / "mia-bridge"
-LOG_DIR = Path.home() / "Library" / "Logs" / "mia-bridge"
+_LIBRARY = Path.home() / "Library"
+LEGACY_APP_DIR = _LIBRARY / "Application Support" / "mia-bridge"
+
+
+def _app_dir() -> Path:
+    """The app directory; an install made before the rename keeps using its old one."""
+    new = _LIBRARY / "Application Support" / "kinchat"
+    return LEGACY_APP_DIR if LEGACY_APP_DIR.is_dir() and not new.exists() else new
+
+
+APP_DIR = _app_dir()
+LOG_DIR = _LIBRARY / "Logs" / "kinchat"
 
 
 @dataclass

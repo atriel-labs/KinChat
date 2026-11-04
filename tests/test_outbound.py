@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 from conftest import CHAT, DM_ALEX
 
-from mia_bridge.outbound import Outbound
+from kinchat.outbound import Outbound
 
 TZ = ZoneInfo("America/Denver")
 

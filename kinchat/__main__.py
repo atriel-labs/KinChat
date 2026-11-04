@@ -1,4 +1,4 @@
-"""mia-bridge CLI: run the service, check setup, or list chats found in chat.db."""
+"""kinchat CLI: run the service, check setup, or list chats found in chat.db."""
 from __future__ import annotations
 
 import argparse
@@ -80,7 +80,7 @@ def cmd_check(cfg: config_mod.Config) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="mia-bridge")
+    p = argparse.ArgumentParser(prog="kinchat")
     p.add_argument("command", nargs="?", default="run", choices=["run", "check", "chats"])
     p.add_argument("--config", type=Path, default=APP_DIR / "config.yaml")
     p.add_argument("-v", "--verbose", action="store_true")
