@@ -86,6 +86,10 @@ keeps working. `scripts/install.sh` stops the old `ai.atriel.mia-bridge` launchd
   only from the account's Sent folder (forged mail lands in the Inbox, never read). Each result is posted once per
   `(UIDVALIDITY, UID)`; `Authentication-Results` is logged, never trusted. The app password is the Keychain
   account `imap-app-password`.
+- **Calendar sources:** `calendar.source` is `graph` (default), `ics` or `none`. ICS feed URLs are credentials, so
+  they live in the Keychain account `ics-urls` (one per line) and are never logged. Invites that any
+  `calendar.owner_emails` attendee hasn't accepted or has declined are left out, as with Graph. Limitation: the
+  ICS parser doesn't expand recurring events (RRULE); only a series' first occurrence is shown, if it's in range.
 - **Restart:** the last processed `chat.db` row is saved; messages more than 5 minutes old when first seen
   are stored for context but not answered. The first run starts from the newest row, not from history.
 - **Results** post to the chat the task came from, never another chat; no STATUS line keeps the task open.

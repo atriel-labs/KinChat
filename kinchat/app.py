@@ -14,6 +14,7 @@ from datetime import datetime
 
 from . import secrets
 from .backends.base import ChatTransport, Incoming, TransportRegistry
+from .backends.calendar import CalendarSource, NoCalendar
 from .config import Config
 from .dashboard import create_app
 from .health import HealthBoard
@@ -45,7 +46,6 @@ class Bridge:
             if getattr(t, "send_health", None) is not None:
                 self.health.register(t.send_health)
         self.h_llm = self.health.add("llm", "Claude API")
-        self.h_calendar = self.health.add("calendar", "Calendar (Graph)")
         self.h_dashboard = self.health.add("dashboard", "Dashboard password")
 
         self.llm = self._start_llm()
@@ -60,6 +60,8 @@ class Bridge:
         self.router = Router(cfg, self.store, self.settings, self._classify, self.transports.participants)
         self.tasks: TaskBackend = self._make_task_backend()
         self.health.register(self.tasks.health)
+        self.calendar_source: CalendarSource = self._make_calendar()
+        self.health.register(self.calendar_source.health)
 
     # --- startup ----------------------------------------------------------
 
@@ -91,7 +93,6 @@ class Bridge:
         missing = [k for k in ("tenant", "client_id", "cert_thumbprint", "mailbox") if not getattr(g, k)]
         if missing:
             self.graph_error = f"graph not configured (missing {', '.join(missing)})"
-            self.h_calendar.failed(self.graph_error)
             return None
         try:
             from .graph import Graph  # imports msal; only needed when Graph is configured
@@ -99,12 +100,8 @@ class Bridge:
                           g.mailbox, self.cfg.timezone)
         except Exception as e:
             self.graph_error = f"{type(e).__name__}: {e}"
-            self.h_calendar.failed(e)
+            log.error("Graph unavailable: %s", self.graph_error)
             return None
-        if g.calendars:
-            self.h_calendar.degraded("not refreshed yet")
-        else:
-            self.h_calendar.failed("no calendars configured")
         return graph
 
     def _dashboard_password(self) -> str | None:
@@ -171,6 +168,39 @@ class Bridge:
     @property
     def h_mail(self):
         return self.tasks.health
+
+    @property
+    def h_calendar(self):
+        return self.calendar_source.health
+
+    def _make_calendar(self) -> CalendarSource:
+        c, g = self.cfg.calendar, self.cfg.graph
+        days = c.days or g.calendar_days
+        if c.source == "none":
+            return NoCalendar()
+        if c.source == "ics":
+            from .backends.cal_ics import IcsCalendar
+            try:
+                urls = secrets.ics_urls()
+            except Exception as e:
+                cal = IcsCalendar([], c.owner_emails, self.cfg.tz, days)
+                cal.health.failed(e)
+                return cal
+            cal = IcsCalendar(urls, c.owner_emails, self.cfg.tz, days)
+            if urls:
+                cal.health.degraded("not refreshed yet")
+            else:
+                cal.health.failed("ics-urls is empty")
+            return cal
+        from .backends.cal_graph import GraphCalendar
+        cal = GraphCalendar(self.graph, g.calendars, days)
+        if self.graph is None:
+            cal.health.failed(self.graph_error or "graph not configured")
+        elif not g.calendars:
+            cal.health.failed("no calendars configured")
+        else:
+            cal.health.degraded("not refreshed yet")
+        return cal
 
     # --- incoming messages -------------------------------------------------
 
@@ -255,7 +285,7 @@ class Bridge:
         threading.Thread(target=loop, name=name, daemon=True).start()
 
     def _refresh_calendar(self) -> None:
-        self.calendar = self.graph.calendar_snapshot(self.cfg.graph.calendars, self.cfg.graph.calendar_days)
+        self.calendar = self.calendar_source.snapshot()
 
     def _prune(self) -> None:
         n = self.store.prune_messages(self.cfg.history_retention_days)
@@ -298,8 +328,9 @@ class Bridge:
             self._every(every, self.tasks.poll, "task-poll", self.tasks.health)
         if self.tasks.name == "mailbox":
             self._every(3600, self._heartbeat, "heartbeat")
-        if self.graph is not None and g.calendars:
-            self._every(g.calendar_refresh_minutes * 60, self._refresh_calendar, "calendar", self.h_calendar)
+        if self.calendar_source.name != "none" and self.h_calendar.state != "failed":
+            minutes = self.cfg.calendar.refresh_minutes or g.calendar_refresh_minutes
+            self._every(minutes * 60, self._refresh_calendar, "calendar", self.h_calendar)
         self._every(6 * 3600, self._prune, "prune")
 
     def run(self) -> None:

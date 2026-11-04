@@ -15,6 +15,7 @@ _LIBRARY = Path.home() / "Library"
 
 TASK_BACKENDS = ("mailbox", "none")
 MAIL_TRANSPORTS = ("graph", "imap")
+CALENDAR_SOURCES = ("graph", "ics", "none")
 
 
 def _valid_zone(name: str | None) -> str | None:
@@ -73,6 +74,14 @@ class Tasks:
     backend: str = "mailbox"  # mailbox or none
     mail: str = "graph"       # mailbox only: graph or imap
     poll_seconds: int = 30    # how often results are fetched (imap; graph uses graph.poll_seconds)
+
+
+@dataclass
+class Calendar:
+    source: str = "graph"  # graph (graph.calendars), ics (Keychain account ics-urls) or none
+    owner_emails: list[str] = field(default_factory=list)  # ics: drop invites these attendees haven't accepted
+    days: int | None = None             # defaults to graph.calendar_days
+    refresh_minutes: int | None = None  # defaults to graph.calendar_refresh_minutes
 
 
 @dataclass
@@ -151,6 +160,7 @@ class Config:
     chat: Chat = field(default_factory=Chat)
     tasks: Tasks = field(default_factory=Tasks)
     imap: Imap = field(default_factory=Imap)
+    calendar: Calendar = field(default_factory=Calendar)
     routing: Routing = field(default_factory=Routing)
     replier: Replier = field(default_factory=Replier)
     dashboard: Dashboard = field(default_factory=Dashboard)
@@ -181,6 +191,7 @@ def load(path: Path) -> Config:
         chat=_section(Chat, raw.get("chat")),
         tasks=_section(Tasks, raw.get("tasks")),
         imap=_section(Imap, raw.get("imap")),
+        calendar=_section(Calendar, raw.get("calendar")),
         routing=_section(Routing, raw.get("routing")),
         replier=_section(Replier, raw.get("replier")),
         dashboard=_section(Dashboard, raw.get("dashboard")),
@@ -206,6 +217,13 @@ def load(path: Path) -> Config:
         raise ValueError(f"config: tasks.backend must be one of {', '.join(TASK_BACKENDS)}")
     if cfg.tasks.mail not in MAIL_TRANSPORTS:
         raise ValueError(f"config: tasks.mail must be one of {', '.join(MAIL_TRANSPORTS)}")
+    if cfg.calendar.source not in CALENDAR_SOURCES:
+        raise ValueError(f"config: calendar.source must be one of {', '.join(CALENDAR_SOURCES)}")
+    cfg.calendar.owner_emails = list(cfg.calendar.owner_emails or [])
+    if cfg.calendar.days is None:
+        cfg.calendar.days = cfg.graph.calendar_days
+    if cfg.calendar.refresh_minutes is None:
+        cfg.calendar.refresh_minutes = cfg.graph.calendar_refresh_minutes
     a = cfg.assistant
     if not a.name.strip() or not a.tag.strip():
         raise ValueError("config: assistant.name and assistant.tag must not be empty")

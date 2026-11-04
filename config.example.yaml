@@ -38,6 +38,12 @@ tasks:
 #   smtp_host: smtp.example.com
 #   smtp_port: 587               # 587 = STARTTLS, 465 = TLS
 
+calendar:
+  source: graph            # graph (graph.calendars below), ics (feed URLs in the Keychain account ics-urls) or none
+  # owner_emails: [you@example.com]   # ics: leave out invites these attendees haven't accepted
+  # days: 14               # defaults to graph.calendar_days
+  # refresh_minutes: 15    # defaults to graph.calendar_refresh_minutes
+
 routing:
   window_minutes: 12
   respond_threshold: 0.75

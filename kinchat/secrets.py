@@ -5,6 +5,7 @@ All secrets live under one generic-password service, one account per secret:
     security add-generic-password -s kinchat -a anthropic-api-key -w 'sk-ant-...'
     security add-generic-password -s kinchat -a dashboard-password -w '...'
     security add-generic-password -s kinchat -a imap-app-password -w '...'      # tasks.mail: imap
+    security add-generic-password -s kinchat -a ics-urls -w "$(printf '%s\n' URL1 URL2)"  # calendar.source: ics
     security add-generic-password -s kinchat -a graph-cert-key-b64 \
         -w "$(base64 -i kinchat-key.pem | tr -d '\\n')"
 
@@ -60,6 +61,10 @@ def dashboard_password() -> str:
 
 def imap_app_password() -> str:
     return get("imap-app-password")
+
+
+def ics_urls() -> list[str]:
+    return [u.strip() for u in get("ics-urls").splitlines() if u.strip()]
 
 
 def graph_cert_private_key() -> str:
