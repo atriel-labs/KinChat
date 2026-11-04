@@ -4,10 +4,12 @@ from __future__ import annotations
 import sqlite3
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-SCHEMA = """
+# Schema version 1. Later changes are new entries in MIGRATIONS below, never edits to this script.
+SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS messages (
     guid TEXT PRIMARY KEY,
     chat_guid TEXT NOT NULL,
@@ -111,6 +113,56 @@ CREATE TABLE IF NOT EXISTS audit (
 OPEN_STATUSES = ("open", "needs_input")
 
 
+def _v1(db: sqlite3.Connection) -> None:
+    """Today's schema. Databases from before versioning (user_version 0) may already have these tables,
+    some without the decisions.cls_* columns, so the tables are created only if missing and the columns
+    added only if missing."""
+    for stmt in _statements(SCHEMA_V1):
+        db.execute(stmt)
+    cols = {r[1] for r in db.execute("PRAGMA table_info(decisions)")}
+    for col, kind in (("cls_route", "INTEGER"), ("cls_reason", "TEXT")):
+        if col not in cols:
+            db.execute(f"ALTER TABLE decisions ADD COLUMN {col} {kind}")
+
+
+# MIGRATIONS[i] takes a database from user_version i to i + 1. Append only.
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1]
+SCHEMA_VERSION = len(MIGRATIONS)
+
+
+def _statements(script: str) -> list[str]:
+    out, buf = [], ""
+    for line in script.splitlines(keepends=True):
+        if line.lstrip().startswith("--"):
+            continue
+        buf += line
+        if sqlite3.complete_statement(buf):
+            out.append(buf.strip())
+            buf = ""
+    return out
+
+
+def schema_version(db: sqlite3.Connection) -> int:
+    return db.execute("PRAGMA user_version").fetchone()[0]
+
+
+def migrate(db: sqlite3.Connection) -> int:
+    """Bring the database up to SCHEMA_VERSION, one migration per transaction. Returns the final version."""
+    version = schema_version(db)
+    if version > SCHEMA_VERSION:
+        raise RuntimeError(f"state.db is schema version {version}; this kinchat only knows up to {SCHEMA_VERSION}")
+    for target in range(version + 1, SCHEMA_VERSION + 1):
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            MIGRATIONS[target - 1](db)
+            db.execute(f"PRAGMA user_version = {target}")
+        except BaseException:
+            db.execute("ROLLBACK")
+            raise
+        db.execute("COMMIT")
+    return SCHEMA_VERSION
+
+
 @dataclass
 class Message:
     guid: str
@@ -144,11 +196,7 @@ class Store:
         self._lock = threading.RLock()
         with self._lock:
             self._db.execute("PRAGMA journal_mode=WAL")
-            self._db.executescript(SCHEMA)
-            cols = {r["name"] for r in self._db.execute("PRAGMA table_info(decisions)")}
-            for col, kind in (("cls_route", "INTEGER"), ("cls_reason", "TEXT")):
-                if col not in cols:  # databases created before these columns existed
-                    self._db.execute(f"ALTER TABLE decisions ADD COLUMN {col} {kind}")
+            migrate(self._db)
 
     def _q(self, sql: str, args: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
