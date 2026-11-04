@@ -93,6 +93,12 @@ keeps working. `scripts/install.sh` replaces the old `ai.atriel.mia-bridge` laun
 
 ## Tests
 
-`.venv/bin/python -m pytest` (57 tests) covers dashboard rules and auth, routing, quiet mode and quiet hours,
+`.venv/bin/python -m pytest` (90 tests) covers dashboard rules and auth, routing, quiet mode and quiet hours,
 dedup, rate limit, `chat.db` parsing against a synthetic database, task handoff and result acceptance.
 Acceptance tests 1, 4 and 10 still need the live group, keys and a Mac restart.
+
+**Personal-data checks.** CI also runs a `scrub` job: [gitleaks](https://github.com/gitleaks/gitleaks) (a pinned,
+checksum-verified release) over the full git history, and `scripts/scrub-denylist.sh`, which checks the tree and
+every commit message against a private list of terms kept in the `SCRUB_DENYLIST` repository secret. A hit fails
+the job and reports only the file and line or the commit hash, never the term or the matching text. Without the
+secret (for example on pull requests from forks) the denylist step is skipped with a warning.
