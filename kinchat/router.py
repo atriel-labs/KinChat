@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from .config import Config
 from .llm import Classification
 from .messages import Incoming
-from .settings import Contact, Settings, norm_handle
+from .settings import Contact, Settings
 from .store import Message, Store, Task
 
 log = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ class Router:
         self.clock = clock
         self.name = cfg.assistant.name
         self.cues = build_cues(cfg.assistant.names)
-        self.own_handles = {norm_handle(h) for h in cfg.assistant.handles} - {""}
+        self.own_handles = {settings.norm(h) for h in cfg.assistant.handles} - {""}
 
     def route(self, inc: Incoming) -> Decision:
         store, settings, r, chat = self.store, self.settings, self.cfg.routing, inc.chat_guid

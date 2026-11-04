@@ -61,7 +61,8 @@ keeps working. `scripts/install.sh` replaces the old `ai.atriel.mia-bridge` laun
 
 ## Behaviour notes (choices the spec left open)
 
-- **Quiet hours (10 PM–7 AM):** outgoing replies and results are held in `state.db` and sent combined at 7 AM.
+- **Quiet hours (default 10 PM–7 AM, `quiet_hours` in `config.yaml`):** outgoing replies and results are held in
+  `state.db` and sent combined when they end. Times use `timezone`, which defaults to the Mac's own zone.
   A message counts as urgent, and is answered right away, if it contains "urgent", "asap" or "emergency".
   Tasks are still handed to Duet overnight.
 - **Instant replies off:** Mia still runs the replier to detect tasks, then posts only "On it, I'll let you know."
@@ -69,6 +70,8 @@ keeps working. `scripts/install.sh` replaces the old `ai.atriel.mia-bridge` laun
   last inbox poll and open-task count. Add to Duet's standing instruction: *"If no [MIA-HEARTBEAT] email has
   arrived in the last 2 hours, tell the owner the iMessage bridge may be down. Never reply to heartbeat emails."*
 - **Controls** ("sit this one out" / "you're back") get a fixed one-line ack. **Closing phrases** close the window, no reply.
+- **Phone numbers** without a `+` are read as national numbers in `default_country` (US by default; also CA, GB,
+  AU, NZ, DE), so `303-555-0100` and `+1 303 555 0100` match, but a foreign number ending in the same digits does not.
 - **Restart:** the last processed `chat.db` row is saved; messages more than 5 minutes old when first seen
   are stored for context but not answered. The first run starts from the newest row, not from history.
 - **Results** post to the chat the task came from, never another chat; no STATUS line keeps the task open.

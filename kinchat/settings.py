@@ -12,22 +12,29 @@ from pathlib import Path
 
 from .store import Store
 
-# key, label, default, what happens when off. {name} is the assistant's name (see feature_rows).
+# key, label, default, what happens when off. {name} and {quiet_start}/{quiet_end} are filled in by feature_rows.
 FEATURES = [
     ("mia_enabled", "{name} enabled (master switch)", True, "Bridge reads and logs, never replies or creates tasks"),
     ("instant_replies", "Instant replies", True, "No chat replies; tasks still go to Duet with a short acknowledgement"),
     ("task_handoff", "Task handoff to Duet", True, "{name} chats but creates no tasks"),
     ("followups", "Follow-ups without naming {name}", True, "{name} responds only when named or replied to inline"),
     ("one_on_one", "One-on-one chats", False, "{name} ignores direct messages, even from approved contacts"),
-    ("quiet_hours", "Quiet hours (10 PM–7 AM)", True, "Replies are held until 7 AM unless marked urgent"),
+    ("quiet_hours", "Quiet hours ({quiet_start}–{quiet_end})", True, "Replies are held until {quiet_end} unless marked urgent"),
     ("heartbeat", "Hourly heartbeat email", True, "No health email; Duet can't detect an outage"),
     ("note_suggestions", "Suggested notes", True, "{name} doesn't suggest facts for family.md"),
 ]
 
 
-def feature_rows(name: str = "Mia") -> list[tuple[str, str, bool, str]]:
+def hour_label(hour: int) -> str:
+    """22 -> "10 PM", 0 -> "12 AM", 12 -> "12 PM"."""
+    hour %= 24
+    return f"{hour % 12 or 12} {'AM' if hour < 12 else 'PM'}"
+
+
+def feature_rows(name: str = "Mia", quiet_start: int = 22, quiet_end: int = 7) -> list[tuple[str, str, bool, str]]:
     """FEATURES with labels filled in for display."""
-    return [(key, label.format(name=name), default, off.format(name=name)) for key, label, default, off in FEATURES]
+    v = {"name": name, "quiet_start": hour_label(quiet_start), "quiet_end": hour_label(quiet_end)}
+    return [(key, label.format(**v), default, off.format(**v)) for key, label, default, off in FEATURES]
 
 
 CHAT_MODES = ("respond", "listen", "off", "pending")
@@ -51,14 +58,32 @@ class Chat:
     first_seen: float
 
 
-def norm_handle(h: str) -> str:
+# Calling codes for default_country: a phone number written without "+" is read as national to that country.
+CALLING_CODES = {"US": "1", "CA": "1", "GB": "44", "AU": "61", "NZ": "64", "DE": "49"}
+NANP = ("US", "CA")  # ten-digit national numbers, no trunk prefix
+
+
+def norm_handle(h: str, country: str = "US") -> str:
+    """Normalise an iMessage handle: email addresses lower-cased, phone numbers as digits with country code.
+
+    Numbers starting with "+" already carry their country code. Others are read as national to `country`:
+    a bare 10-digit number in the US/Canada gets "1"; elsewhere a leading trunk "0" is replaced by the
+    calling code, and a leading "00" means the number is international. Anything else is compared as written, so a foreign number that merely ends in the same
+    digits as a contact's never matches."""
     h = h.strip().lower()
     if "@" in h:
         return h
     digits = "".join(c for c in h if c.isdigit())
-    # Compare whole numbers with country code. A bare 10-digit number is taken as North American, so
-    # "+1 303..." and "303-..." match, but a foreign number ending in the same 10 digits does not.
-    return "1" + digits if len(digits) == 10 and not h.startswith("+") else digits
+    if not digits or h.startswith("+"):
+        return digits
+    code = CALLING_CODES.get(country.upper(), "1")
+    if country.upper() in NANP:
+        return code + digits if len(digits) == 10 else digits
+    if digits.startswith("00"):  # international prefix outside North America, same as "+"
+        return digits[2:]
+    if digits.startswith("0"):
+        return code + digits[1:]
+    return digits
 
 
 def is_group_guid(chat_guid: str) -> bool:
@@ -66,10 +91,14 @@ def is_group_guid(chat_guid: str) -> bool:
 
 
 class Settings:
-    def __init__(self, store: Store):
+    def __init__(self, store: Store, default_country: str = "US"):
         self._s = store
+        self.country = default_country
         for key, _, default, _ in FEATURES:
             store._q("INSERT OR IGNORE INTO features (key, enabled) VALUES (?, ?)", (key, int(default)))
+
+    def norm(self, handle: str) -> str:
+        return norm_handle(handle, self.country)
 
     def _audit(self, actor: str, item: str, old, new) -> None:
         self._s._q("INSERT INTO audit (ts, actor, item, old, new) VALUES (?, ?, ?, ?, ?)",
@@ -105,11 +134,11 @@ class Settings:
     def contact_for_handle(self, handle: str | None) -> Contact | None:
         if not handle:
             return None
-        h = norm_handle(handle)
+        h = self.norm(handle)
         if not h:
             return None
         for c in self.contacts():
-            if h in {norm_handle(x) for x in c.handles}:
+            if h in {self.norm(x) for x in c.handles}:
                 return c
         return None
 
@@ -168,7 +197,7 @@ class Settings:
             self._s._q("UPDATE chats SET participants = ? WHERE chat_guid = ?",
                        (json.dumps(participants), chat.chat_guid))
         strangers = [h for h in participants
-                     if norm_handle(h) not in ignore and self.contact_for_handle(h) is None]
+                     if self.norm(h) not in ignore and self.contact_for_handle(h) is None]
         if strangers and chat.mode in ("respond", "listen"):
             self._s._q("UPDATE chats SET mode = 'pending' WHERE chat_guid = ?", (chat.chat_guid,))
             self._audit("bridge", f"chat {chat.name or chat.chat_guid} (new member {', '.join(strangers)})",

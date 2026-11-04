@@ -53,4 +53,8 @@ graph:
   calendar_refresh_minutes: 15
   calendar_days: 14
 
-timezone: America/Denver
+# IANA time zone for quiet hours, timestamps and the calendar. Defaults to the Mac's own time zone.
+# timezone: America/Denver
+
+# Phone numbers written without "+" are read as national numbers in this country: US, CA, GB, AU, NZ or DE.
+default_country: US

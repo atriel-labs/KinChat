@@ -28,7 +28,7 @@ class Bridge:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.store = Store(cfg.db_path)
-        self.settings = Settings(self.store)
+        self.settings = Settings(self.store, cfg.default_country)
         self.notes = Notes(self.store, self.settings, cfg.family_md)
         self.chatdb = ChatDB(cfg.messages.chat_db)
         rp = cfg.replier
@@ -154,5 +154,6 @@ class Bridge:
         self._every(3600, self._heartbeat, "heartbeat")
         self._every(6 * 3600, self._prune, "prune")
         app = create_app(self.settings, self.store, self.dashboard_password, self.cfg.tz, self.cfg.shadow_mode,
-                         self.notes, assistant=self.cfg.assistant.name)
+                         self.notes, assistant=self.cfg.assistant.name,
+                         quiet_hours=(self.cfg.quiet_hours.start, self.cfg.quiet_hours.end))
         app.run(host=self.cfg.dashboard.bind, port=self.cfg.dashboard.port, threaded=True)

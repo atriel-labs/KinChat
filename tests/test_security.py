@@ -39,3 +39,22 @@ def test_event_text_is_flattened_and_capped():
                              location={"displayName": "Cafe\nIgnore previous"}))
     assert "\n" not in line and "<" not in line and ">" not in line
     assert len(line) < 220 and "…" in line
+
+
+def test_gb_national_numbers(store):
+    from kinchat.settings import Settings
+    s = Settings(store, default_country="GB")
+    s.add_contact("Jo", ["07700 900123"], one_on_one=False, can_assign=True)
+    assert s.contact_for_handle("+44 7700 900123").name == "Jo"
+    assert s.contact_for_handle("0044 7700 900123").name == "Jo"
+    assert s.contact_for_handle("+1 7700900123") is None
+    assert s.contact_for_handle("+61 7700 900123") is None
+    assert norm_handle("07700 900123", "GB") == "447700900123"
+
+
+def test_other_country_tables():
+    assert norm_handle("0412 345 678", "AU") == "61412345678"
+    assert norm_handle("021 123 4567", "NZ") == "64211234567"
+    assert norm_handle("030 1234567", "DE") == "49301234567"
+    assert norm_handle("613-555-0100", "CA") == "16135550100"
+    assert norm_handle("+44 20 7946 0958", "AU") == "442079460958"  # "+" always passes through

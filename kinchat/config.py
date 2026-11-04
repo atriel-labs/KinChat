@@ -1,13 +1,46 @@
 """Load config.yaml (infrastructure only; contacts, chats and toggles live in the dashboard)."""
 from __future__ import annotations
 
+import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
+from .settings import CALLING_CODES
+
 _LIBRARY = Path.home() / "Library"
+
+
+def _valid_zone(name: str | None) -> str | None:
+    if not name:
+        return None
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    return name
+
+
+def system_timezone(localtime: str = "/etc/localtime") -> str:
+    """The system's IANA time zone: from the /etc/localtime link (macOS and most Linux), then time.tzname,
+    falling back to UTC."""
+    try:
+        target = os.path.realpath(localtime) if os.path.islink(localtime) else ""
+    except OSError:
+        target = ""
+    if "zoneinfo/" in target:
+        name = _valid_zone(target.split("zoneinfo/", 1)[1])
+        if name:
+            return name
+    for name in time.tzname:
+        # Only region names: abbreviations like "MST" are fixed-offset legacy zones with no daylight saving.
+        if "/" in name and _valid_zone(name):
+            return name
+    return "UTC"
+
 LEGACY_APP_DIR = _LIBRARY / "Application Support" / "mia-bridge"
 
 
@@ -95,7 +128,8 @@ class Config:
     quiet_hours: QuietHours = field(default_factory=QuietHours)
     graph: Graph = field(default_factory=Graph)
     assistant: Assistant = field(default_factory=Assistant)
-    timezone: str = "America/Denver"
+    timezone: str = field(default_factory=system_timezone)
+    default_country: str = "US"
     shadow_mode: bool = True
     family_md: Path = APP_DIR / "family.md"
     db_path: Path = APP_DIR / "state.db"
@@ -121,9 +155,14 @@ def load(path: Path) -> Config:
         quiet_hours=_section(QuietHours, raw.get("quiet_hours")),
         graph=_section(Graph, raw.get("graph")),
         assistant=_section(Assistant, raw.get("assistant")),
-        timezone=raw.get("timezone", "America/Denver"),
+        timezone=raw.get("timezone") or system_timezone(),
+        default_country=str(raw.get("default_country") or "US").upper(),
         shadow_mode=bool(raw.get("shadow_mode", True)),
     )
+    if not _valid_zone(cfg.timezone):
+        raise ValueError(f"config: unknown timezone {cfg.timezone!r}")
+    if cfg.default_country not in CALLING_CODES:
+        raise ValueError(f"config: default_country must be one of {', '.join(CALLING_CODES)}")
     if cfg.dashboard.bind not in ("127.0.0.1", "localhost", "::1"):
         raise ValueError("config: dashboard.bind must be a loopback address")
     a = cfg.assistant

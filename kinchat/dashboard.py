@@ -107,7 +107,7 @@ MODE_LABELS = {"respond": "Respond", "listen": "Listen only", "off": "Off", "pen
 
 
 def create_app(settings: Settings, store: Store, password: str, tz: ZoneInfo, shadow: bool,
-               notes: Notes | None = None, assistant: str = "Mia") -> Flask:
+               notes: Notes | None = None, assistant: str = "Mia", quiet_hours: tuple[int, int] = (22, 7)) -> Flask:
     app = Flask("kinchat-dashboard")
     app.secret_key = os.urandom(32)
     app.config.update(SESSION_COOKIE_SAMESITE="Strict", SESSION_COOKIE_HTTPONLY=True)
@@ -151,7 +151,7 @@ def create_app(settings: Settings, store: Store, password: str, tz: ZoneInfo, sh
     @app.get("/")
     def index():
         return render_template_string(
-            PAGE, csrf=session["csrf"], shadow=shadow, features=feature_rows(assistant), state=settings.features(),
+            PAGE, csrf=session["csrf"], shadow=shadow, features=feature_rows(assistant, *quiet_hours), state=settings.features(),
             contacts=settings.contacts(), chats=settings.chats(), modes=CHAT_MODES, mode_labels=MODE_LABELS,
             decisions=store.recent_decisions(30), audit=settings.audit_log(100), fmt=fmt,
             notes=notes.pending() if notes else [], name=assistant)
