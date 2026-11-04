@@ -72,6 +72,11 @@ keeps working. `scripts/install.sh` replaces the old `ai.atriel.mia-bridge` laun
 - **Controls** ("sit this one out" / "you're back") get a fixed one-line ack. **Closing phrases** close the window, no reply.
 - **Phone numbers** without a `+` are read as national numbers in `default_country` (US by default; also CA, GB,
   AU, NZ, DE), so `303-555-0100` and `+1 303 555 0100` match, but a foreign number ending in the same digits does not.
+- **Health:** each part (chat.db watcher, Messages sending, Claude API, Graph task mail, calendar, dashboard
+  password) starts on its own. A missing secret, Graph config or permission turns that part off and shows as
+  *failed* in the dashboard's Health section (and in the heartbeat); a later error shows as *degraded* while it
+  retries. Without a dashboard password the dashboard still starts, but sign-in is disabled until one is added.
+  At startup the bridge asks Messages for its chat count once, so the Automation prompt appears.
 - **Restart:** the last processed `chat.db` row is saved; messages more than 5 minutes old when first seen
   are stored for context but not answered. The first run starts from the newest row, not from history.
 - **Results** post to the chat the task came from, never another chat; no STATUS line keeps the task open.

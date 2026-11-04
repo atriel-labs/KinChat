@@ -10,11 +10,13 @@ import hmac
 import os
 import secrets as pysecrets
 import time
+from collections.abc import Callable
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from flask import Flask, abort, redirect, render_template_string, request, session, url_for
 
+from .health import Status
 from .settings import CHAT_MODES, FEATURES, Notes, Settings, feature_rows
 from .store import Store
 
@@ -33,6 +35,12 @@ PAGE = """<!doctype html>
 <form method="post" action="{{ url_for('logout') }}" style="float:right"><input type="hidden" name="csrf" value="{{ csrf }}"><button>Sign out</button></form>
 <h1>{{ name }} bridge</h1>
 {% if shadow %}<p class="banner">Shadow mode is on in config.yaml: decisions are logged, nothing is sent.</p>{% endif %}
+
+<h2>Health</h2>
+<table><tr><th>Subsystem</th><th>State</th><th>Last OK</th><th>Last error</th></tr>
+{% for h in health %}<tr class="{{ 'pending' if h.state != 'ok' else '' }}"><td>{{ h.label }}</td><td>{{ h.state }}</td>
+<td class="muted">{{ fmt(h.last_ok) if h.last_ok else 'never' }}</td><td class="muted">{{ h.last_error if h.state != 'ok' else '' }}</td></tr>
+{% else %}<tr><td colspan="4" class="muted">Not reported.</td></tr>{% endfor %}</table>
 
 <h2>Feature toggles</h2>
 <form method="post" action="{{ url_for('save_features') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
@@ -99,15 +107,19 @@ PAGE = """<!doctype html>
 
 LOGIN = """<!doctype html><html><head><meta charset="utf-8"><title>{{ name }} bridge</title>
 <style>body{font:15px -apple-system,system-ui,sans-serif;max-width:320px;margin:80px auto;padding:0 16px;background:#fff;color:#1d1d1f}</style></head>
-<body><h1>{{ name }} bridge</h1>{% if error %}<p style="color:#b00">Wrong password.</p>{% endif %}
+<body><h1>{{ name }} bridge</h1>{% if not configured %}<p style="color:#b00">No dashboard password is set, so sign-in is
+disabled. Add one to the Keychain and restart:<br><code>security add-generic-password -s kinchat -a dashboard-password -w '...'</code></p>
+{% elif error %}<p style="color:#b00">Wrong password.</p>{% endif %}
 <form method="post"><input type="password" name="password" autofocus required style="width:100%">
 <p><button>Sign in</button></p></form></body></html>"""
 
 MODE_LABELS = {"respond": "Respond", "listen": "Listen only", "off": "Off", "pending": "Pending"}
 
 
-def create_app(settings: Settings, store: Store, password: str, tz: ZoneInfo, shadow: bool,
-               notes: Notes | None = None, assistant: str = "Mia", quiet_hours: tuple[int, int] = (22, 7)) -> Flask:
+def create_app(settings: Settings, store: Store, password: str | None, tz: ZoneInfo, shadow: bool,
+               notes: Notes | None = None, assistant: str = "Mia", quiet_hours: tuple[int, int] = (22, 7),
+               health: Callable[[], list[Status]] | None = None) -> Flask:
+    """The dashboard app. With no password (missing from the Keychain) it still serves, but nobody can sign in."""
     app = Flask("kinchat-dashboard")
     app.secret_key = os.urandom(32)
     app.config.update(SESSION_COOKIE_SAMESITE="Strict", SESSION_COOKIE_HTTPONLY=True)
@@ -134,14 +146,14 @@ def create_app(settings: Settings, store: Store, password: str, tz: ZoneInfo, sh
     def login():
         error = False
         if request.method == "POST":
-            if hmac.compare_digest(request.form.get("password", "").encode(), password.encode()):
+            if password and hmac.compare_digest(request.form.get("password", "").encode(), password.encode()):
                 session.clear()
                 session["ok"] = True
                 session["csrf"] = pysecrets.token_urlsafe(32)
                 return redirect(url_for("index"))
             time.sleep(1)
             error = True
-        return render_template_string(LOGIN, error=error, name=assistant)
+        return render_template_string(LOGIN, error=error, name=assistant, configured=bool(password))
 
     @app.post("/logout")
     def logout():
@@ -154,7 +166,7 @@ def create_app(settings: Settings, store: Store, password: str, tz: ZoneInfo, sh
             PAGE, csrf=session["csrf"], shadow=shadow, features=feature_rows(assistant, *quiet_hours), state=settings.features(),
             contacts=settings.contacts(), chats=settings.chats(), modes=CHAT_MODES, mode_labels=MODE_LABELS,
             decisions=store.recent_decisions(30), audit=settings.audit_log(100), fmt=fmt,
-            notes=notes.pending() if notes else [], name=assistant)
+            notes=notes.pending() if notes else [], name=assistant, health=health() if health else [])
 
     @app.post("/notes/<int:note_id>")
     def decide_note(note_id: int):
