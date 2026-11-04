@@ -90,6 +90,10 @@ class Bridge:
     def _start_graph(self):
         g = self.cfg.graph
         self.graph_error: str | None = None
+        t, c = self.cfg.tasks, self.cfg.calendar
+        if not ((t.backend == "mailbox" and t.mail == "graph") or c.source == "graph"):
+            self.graph_error = "graph not selected"
+            return None  # nothing uses Graph: don't build it (or import msal)
         missing = [k for k in ("tenant", "client_id", "cert_thumbprint", "mailbox") if not getattr(g, k)]
         if missing:
             self.graph_error = f"graph not configured (missing {', '.join(missing)})"

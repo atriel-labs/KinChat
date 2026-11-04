@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
-import msal
 
 from .backends.calendar import MAX_EVENT_FIELD, clean, format_event, section  # noqa: F401
 
@@ -18,6 +17,10 @@ GRAPH = "https://graph.microsoft.com/v1.0"
 class Graph:
     def __init__(self, tenant: str, client_id: str, cert_thumbprint: str, private_key_pem: str,
                  mailbox: str, timezone: str):
+        try:
+            import msal  # optional: pip install 'kinchat[graph]'
+        except ImportError as e:
+            raise RuntimeError("Graph needs msal: pip install 'kinchat[graph]'") from e
         self.mailbox = mailbox
         self._tz = timezone
         self._app = msal.ConfidentialClientApplication(

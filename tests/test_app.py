@@ -1,6 +1,7 @@
 import sqlite3
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -52,6 +53,33 @@ def test_graph_and_msal_imported_lazily():
     code = "import sys, kinchat.app; print('msal' in sys.modules, 'kinchat.graph' in sys.modules)"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
     assert out.split() == ["False", "False"]
+
+
+def test_works_without_msal_installed():
+    code = (
+        "import sys; sys.modules['msal'] = None\n"  # as if the [graph] extra weren't installed
+        "import kinchat.app, kinchat.graph, kinchat.backends.cal_ics, kinchat.backends.mail_imap\n"
+        "try:\n"
+        "    kinchat.graph.Graph('t', 'c', 'x', 'k', 'm', 'UTC')\n"
+        "except RuntimeError as e:\n"
+        "    print(e)\n"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
+    assert "pip install 'kinchat[graph]'" in out
+
+
+def test_graph_built_only_when_selected(no_secrets, bare_cfg, monkeypatch):
+    g = bare_cfg.graph
+    g.tenant, g.client_id, g.cert_thumbprint, g.mailbox = "example.com", "id", "thumb", "mia@example.com"
+    built = []
+    import kinchat.graph
+    monkeypatch.setattr(kinchat.graph, "Graph", lambda *a: built.append(a) or SimpleNamespace(mailbox=a[4]))
+    monkeypatch.setattr("kinchat.secrets.graph_cert_private_key", lambda: "pem")
+    Bridge(bare_cfg)
+    assert len(built) == 1  # defaults: Graph mail + Graph calendar
+    bare_cfg.tasks.mail, bare_cfg.calendar.source = "imap", "ics"
+    b = Bridge(bare_cfg)
+    assert len(built) == 1 and b.graph is None
 
 
 class FakeGraphMail:

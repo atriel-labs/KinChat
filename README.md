@@ -20,6 +20,9 @@ kinchat/
 
 ## Setup
 
+Install with `pip install -e '.[graph]'` when you use Microsoft 365 (Graph task mail or calendar, the default);
+`msal` is only needed then. `scripts/install.sh` does this. New chat networks: see `docs/writing-a-transport.md`.
+
 1. **Mac account.** Log in as the dedicated `mia` macOS user. Sign in to Messages with the assistant's own Apple ID.
    Turn on FileVault and the firewall ("Block all incoming connections"), and disable sleep.
 2. **Install:** `scripts/install.sh`. It creates the venv, copies `config.yaml` and `family.md` into

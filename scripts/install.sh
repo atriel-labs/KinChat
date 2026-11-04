@@ -21,7 +21,8 @@ mkdir -p "$APP" "$LOGS" "$HOME/Library/LaunchAgents"
 if [[ ! -d "$PROJECT/.venv" ]]; then
   "$PY" -m venv "$PROJECT/.venv"
 fi
-"$PROJECT/.venv/bin/pip" install -q -e "$PROJECT"
+# [graph] brings msal for Microsoft 365 task mail and calendar, which the default config uses.
+"$PROJECT/.venv/bin/pip" install -q -e "$PROJECT[graph]"
 
 [[ -f "$APP/config.yaml" ]] || cp "$PROJECT/config.example.yaml" "$APP/config.yaml"
 [[ -f "$APP/family.md" ]] || cp "$PROJECT/family.example.md" "$APP/family.md"

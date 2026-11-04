@@ -64,19 +64,22 @@ def cmd_check(cfg: config_mod.Config) -> int:
     step("Messages scriptable (Automation)", lambda: f"{messages_scriptable()} chats")
     step("keychain: anthropic-api-key", lambda: bool(secrets.anthropic_api_key()) and None)
     step("keychain: dashboard-password", lambda: bool(secrets.dashboard_password()) and None)
-    step("keychain: graph-cert-key-b64", lambda: bool(secrets.graph_cert_private_key()) and None)
+    uses_graph = (cfg.tasks.backend == "mailbox" and cfg.tasks.mail == "graph") or cfg.calendar.source == "graph"
+    if uses_graph:
+        step("keychain: graph-cert-key-b64", lambda: bool(secrets.graph_cert_private_key()) and None)
     step("anthropic models", lambda: ", ".join(
         anthropic.Anthropic(api_key=secrets.anthropic_api_key()).models.retrieve(m).id
         for m in (cfg.replier.model_router, cfg.replier.model_reply)))
 
     def graph():
-        from .graph import Graph  # imports msal
+        from .graph import Graph  # needs msal: pip install 'kinchat[graph]'
         g = cfg.graph
         client = Graph(g.tenant, g.client_id, g.cert_thumbprint, secrets.graph_cert_private_key(), g.mailbox, cfg.timezone)
         client._get(f"/users/{g.mailbox}/mailFolders/inbox", {"$select": "totalItemCount"})
         snap = client.calendar_snapshot(g.calendars, 1)
         return f"inbox readable; calendars readable ({len(snap.splitlines())} lines)"
-    step("graph mailbox + calendars", graph)
+    if uses_graph:
+        step("graph mailbox + calendars", graph)
     return 0 if ok else 1
 
 
