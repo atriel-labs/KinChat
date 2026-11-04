@@ -7,6 +7,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from datetime import datetime
+from enum import StrEnum
 from zoneinfo import ZoneInfo
 
 from .settings import Settings
@@ -15,6 +16,16 @@ from .store import Store
 log = logging.getLogger(__name__)
 
 RATE_WINDOW_S = 600
+
+
+class PostStatus(StrEnum):
+    """What happened to a message handed to Outbound.post."""
+    SENT = "sent"        # handed to Messages
+    QUEUED = "queued"    # rate limit reached; sent by tick() later
+    HELD = "held"        # quiet hours; sent when they end
+    REFUSED = "refused"  # the dashboard doesn't allow posting there (or the text was empty)
+    SHADOW = "shadow"    # shadow mode: logged, not sent
+    FAILED = "failed"    # Messages raised an error
 
 
 class Outbound:
@@ -41,25 +52,25 @@ class Outbound:
         start, end = self._quiet
         return hour >= start or hour < end if start > end else start <= hour < end
 
-    def post(self, chat_guid: str, text: str, urgent: bool = False) -> None:
+    def post(self, chat_guid: str, text: str, urgent: bool = False) -> PostStatus:
         text = text.strip()
         if not text:
-            return
+            return PostStatus.REFUSED
         if not self._settings.can_speak_in(chat_guid):
             log.info("not posting to %s: dashboard does not allow it", chat_guid)
-            return
+            return PostStatus.REFUSED
         if self.in_quiet_hours() and not urgent:
             self._store.hold(chat_guid, text)
             log.info("quiet hours: held message for %s", chat_guid)
-            return
+            return PostStatus.HELD
         with self._lock:
             self._expire()
             if self._pending.get(chat_guid) or len(self._sent) >= self._max:
                 self._pending.setdefault(chat_guid, []).append(text)
                 log.info("rate limit reached; queued message for %s", chat_guid)
-                return
+                return PostStatus.QUEUED
             self._sent.append(self._clock())
-        self._deliver(chat_guid, text)
+        return self._deliver(chat_guid, text)
 
     def tick(self) -> None:
         """Release held messages after quiet hours and flush rate-limited queues. Called every few seconds."""
@@ -83,17 +94,18 @@ class Outbound:
         while self._sent and self._sent[0] <= cutoff:
             self._sent.popleft()
 
-    def _deliver(self, chat_guid: str, text: str) -> None:
+    def _deliver(self, chat_guid: str, text: str) -> PostStatus:
         if not self._settings.can_speak_in(chat_guid):  # settings may have changed while queued
             log.info("dropped queued message for %s: dashboard no longer allows it", chat_guid)
-            return
+            return PostStatus.REFUSED
         if self._shadow:
             log.info("[shadow] would send to %s: %s", chat_guid, text)
-            return
+            return PostStatus.SHADOW
         try:
             self._send_fn(chat_guid, text)
         except Exception:
             log.exception("send to %s failed", chat_guid)
-            return
+            return PostStatus.FAILED
         # The sent message comes back through chat.db as is_from_me and is stored then.
         self._store.open_window(chat_guid, self._window_minutes, self._clock())
+        return PostStatus.SENT
