@@ -80,14 +80,32 @@ def cmd_check(cfg: config_mod.Config) -> int:
     return 0 if ok else 1
 
 
+def cmd_agent(cfg: config_mod.Config, action: str | None, config_path: Path) -> int:
+    if action != "setup":
+        print("usage: kinchat agent setup")
+        return 2
+    import anthropic
+
+    from .backends.managed_agents import setup, write_state
+    client = anthropic.Anthropic(api_key=secrets.anthropic_api_key())
+    state = setup(client, cfg)
+    write_state(config_path, state)
+    print(f"agent {state['agent_id']} (version {state['agent_version']}), environment {state['environment_id']}")
+    print(f"saved to {config_path}; set tasks.backend: managed_agents and restart")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="kinchat")
-    p.add_argument("command", nargs="?", default="run", choices=["run", "check", "chats"])
+    p.add_argument("command", nargs="?", default="run", choices=["run", "check", "chats", "agent"])
+    p.add_argument("action", nargs="?", help="for `agent`: setup")
     p.add_argument("--config", type=Path, default=APP_DIR / "config.yaml")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
     _setup_logging(args.verbose)
     cfg = config_mod.load(args.config)
+    if args.command == "agent":
+        return cmd_agent(cfg, args.action, args.config)
     return {"run": cmd_run, "check": cmd_check, "chats": cmd_chats}[args.command](cfg)
 
 

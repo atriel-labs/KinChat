@@ -86,6 +86,14 @@ keeps working. `scripts/install.sh` stops the old `ai.atriel.mia-bridge` launchd
   only from the account's Sent folder (forged mail lands in the Inbox, never read). Each result is posted once per
   `(UIDVALIDITY, UID)`; `Authentication-Results` is logged, never trusted. The app password is the Keychain
   account `imap-app-password`.
+- **Managed Agents tasks:** with `tasks.backend: managed_agents`, `kinchat agent setup` creates (or updates in place)
+  one agent and environment and records their IDs in `config.yaml`. Each task runs in its own session with a
+  spending cap (`managed_agents.budget_usd`) and the configured vaults; updates and answers go to the same
+  session. The agent can only reach the chat through its `post_to_chat` tool, which the bridge checks (task open,
+  right session), posts through the usual dashboard rules and quiet hours, and always answers at once with what
+  happened. A session that hits its cap pauses; the chat is told once and the next update starts a fresh
+  attempt. Tool calls that would need approval are denied (nobody watches these sessions live). Finished
+  sessions are archived after 24 hours.
 - **Calendar sources:** `calendar.source` is `graph` (default), `ics` or `none`. ICS feed URLs are credentials, so
   they live in the Keychain account `ics-urls` (one per line) and are never logged. Invites that any
   `calendar.owner_emails` attendee hasn't accepted or has declined are left out, as with Graph. Limitation: the

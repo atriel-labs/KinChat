@@ -143,8 +143,14 @@ def _v3(db: sqlite3.Connection) -> None:
     db.execute("ALTER TABLE tasks ADD COLUMN session_id TEXT")
 
 
+def _v4(db: sqlite3.Connection) -> None:
+    """Managed Agents session events already handled, so each is acted on once."""
+    db.execute("CREATE TABLE IF NOT EXISTS agent_events (event_id TEXT PRIMARY KEY, session_id TEXT NOT NULL,"
+               " ts REAL NOT NULL)")
+
+
 # MIGRATIONS[i] takes a database from user_version i to i + 1. Append only.
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3]
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3, _v4]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -325,7 +331,8 @@ class Store:
     def relevant_tasks(self, chat_guid: str, finished_within_days: int = 3) -> list[Task]:
         cutoff = time.time() - finished_within_days * 86400
         rows = self._q(
-            "SELECT * FROM tasks WHERE chat_guid = ? AND (status IN ('open', 'needs_input') OR updated_ts >= ?)"
+            "SELECT * FROM tasks WHERE chat_guid = ? AND (status IN ('open', 'needs_input', 'paused_budget')"
+            " OR updated_ts >= ?)"
             " ORDER BY created_ts",
             (chat_guid, cutoff),
         ).fetchall()

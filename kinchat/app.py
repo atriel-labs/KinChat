@@ -141,6 +141,18 @@ class Bridge:
         t = self.cfg.tasks
         if t.backend == "none":
             return NoTaskBackend()
+        if t.backend == "managed_agents":
+            from .backends.managed_agents import ManagedAgentsBackend
+            client, error = None, None
+            try:
+                import anthropic
+                client = anthropic.Anthropic(api_key=secrets.anthropic_api_key(), max_retries=2)
+            except Exception as e:
+                error = e
+            backend = ManagedAgentsBackend(self.cfg, self.store, client, self.outbound.post)
+            if error is not None:
+                backend.health.failed(error)
+            return backend
         from .backends.mailbox import MailboxBackend
         mail, error = None, None
         if t.mail == "imap":

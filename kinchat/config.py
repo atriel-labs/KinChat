@@ -13,7 +13,7 @@ from .settings import CALLING_CODES
 
 _LIBRARY = Path.home() / "Library"
 
-TASK_BACKENDS = ("mailbox", "none")
+TASK_BACKENDS = ("mailbox", "managed_agents", "none")
 MAIL_TRANSPORTS = ("graph", "imap")
 CALENDAR_SOURCES = ("graph", "ics", "none")
 
@@ -74,6 +74,22 @@ class Tasks:
     backend: str = "mailbox"  # mailbox or none
     mail: str = "graph"       # mailbox only: graph or imap
     poll_seconds: int = 30    # how often results are fetched (imap; graph uses graph.poll_seconds)
+
+
+@dataclass
+class ManagedAgents:
+    model: str = "claude-opus-5-5"
+    budget_usd: float | None = 5.0  # spending cap per task session, at list prices; null for none
+    vault_ids: list[str] = field(default_factory=list)  # credentials for MCP servers and tools
+    mcp_servers: list[dict] = field(default_factory=list)  # [{name, url}]
+    web: bool = False                # let the agent use web search/fetch
+    networking: str = "limited"      # limited or unrestricted (the sandbox's outbound network)
+    allowed_hosts: list[str] = field(default_factory=list)  # limited networking: hosts the agent may reach
+    archive_after_hours: float = 24
+    # Written by `kinchat agent setup` (in the managed_agents_state block); not set by hand.
+    agent_id: str = ""
+    agent_version: int | None = None
+    environment_id: str = ""
 
 
 @dataclass
@@ -161,6 +177,7 @@ class Config:
     tasks: Tasks = field(default_factory=Tasks)
     imap: Imap = field(default_factory=Imap)
     calendar: Calendar = field(default_factory=Calendar)
+    managed_agents: ManagedAgents = field(default_factory=ManagedAgents)
     routing: Routing = field(default_factory=Routing)
     replier: Replier = field(default_factory=Replier)
     dashboard: Dashboard = field(default_factory=Dashboard)
@@ -192,6 +209,8 @@ def load(path: Path) -> Config:
         tasks=_section(Tasks, raw.get("tasks")),
         imap=_section(Imap, raw.get("imap")),
         calendar=_section(Calendar, raw.get("calendar")),
+        managed_agents=_section(ManagedAgents, {**(raw.get("managed_agents") or {}),
+                                                **(raw.get("managed_agents_state") or {})}),
         routing=_section(Routing, raw.get("routing")),
         replier=_section(Replier, raw.get("replier")),
         dashboard=_section(Dashboard, raw.get("dashboard")),
@@ -224,6 +243,13 @@ def load(path: Path) -> Config:
         cfg.calendar.days = cfg.graph.calendar_days
     if cfg.calendar.refresh_minutes is None:
         cfg.calendar.refresh_minutes = cfg.graph.calendar_refresh_minutes
+    ma = cfg.managed_agents
+    ma.vault_ids, ma.allowed_hosts = list(ma.vault_ids or []), list(ma.allowed_hosts or [])
+    ma.mcp_servers = list(ma.mcp_servers or [])
+    if any(not isinstance(m, dict) or not m.get("name") or not m.get("url") for m in ma.mcp_servers):
+        raise ValueError("config: each managed_agents.mcp_servers entry needs a name and a url")
+    if ma.networking not in ("limited", "unrestricted"):
+        raise ValueError("config: managed_agents.networking must be limited or unrestricted")
     a = cfg.assistant
     if not a.name.strip() or not a.tag.strip():
         raise ValueError("config: assistant.name and assistant.tag must not be empty")

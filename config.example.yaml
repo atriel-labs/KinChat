@@ -22,7 +22,8 @@ messages:                  # the imessage transport
   poll_seconds: 2
 
 tasks:
-  backend: mailbox         # mailbox: email tasks to an agent ([MIA-CHAT] out, [MIA-POST] back); none: no tasks
+  backend: mailbox         # mailbox: email tasks to an agent ([MIA-CHAT] out, [MIA-POST] back);
+                           # managed_agents: one Claude Managed Agents session per task (see below); none: no tasks
   mail: graph              # mailbox only: graph (Microsoft 365, see graph: below) or imap (see imap: below)
   poll_seconds: 30         # imap only; graph uses graph.poll_seconds
 
@@ -37,6 +38,19 @@ tasks:
 #   sent_folder: Sent            # Gmail: "[Gmail]/Sent Mail"
 #   smtp_host: smtp.example.com
 #   smtp_port: 587               # 587 = STARTTLS, 465 = TLS
+
+# Only for tasks.backend: managed_agents. Run `kinchat agent setup` once (and after changing this section): it
+# creates or updates the agent and its environment and records their IDs at the end of this file.
+# managed_agents:
+#   model: claude-opus-5-5
+#   budget_usd: 5.00             # spending cap per task session at list prices; the family is told if it's hit
+#   vault_ids: [vlt_example]     # credentials for the MCP servers below
+#   mcp_servers:
+#     - {name: notes, url: "https://mcp.example.com/sse"}
+#   web: false                   # let the agent search and read the web
+#   networking: limited          # or unrestricted (full outbound network for the sandbox)
+#   allowed_hosts: []            # limited networking: hosts the agent may reach, e.g. [www.example.com]
+#   archive_after_hours: 24      # finished tasks' sessions are archived after this
 
 calendar:
   source: graph            # graph (graph.calendars below), ics (feed URLs in the Keychain account ics-urls) or none
