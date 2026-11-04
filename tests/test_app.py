@@ -4,28 +4,9 @@ import sys
 
 import pytest
 
-from kinchat import secrets
 from kinchat.app import Bridge
-from kinchat.config import Config
 
 BASE = "http://127.0.0.1:8770"
-
-
-@pytest.fixture
-def no_secrets(monkeypatch):
-    monkeypatch.setattr(secrets, "_keychain", lambda service, account: None)
-    for prefix in ("KINCHAT_", "MIA_BRIDGE_"):
-        for account in ("ANTHROPIC_API_KEY", "DASHBOARD_PASSWORD", "GRAPH_CERT_KEY_B64"):
-            monkeypatch.delenv(prefix + account, raising=False)
-
-
-@pytest.fixture
-def bare_cfg(tmp_path):
-    cfg = Config(shadow_mode=True)
-    cfg.db_path = tmp_path / "state.db"
-    cfg.family_md = tmp_path / "family.md"
-    cfg.messages.chat_db = str(tmp_path / "missing-chat.db")
-    return cfg
 
 
 def states(bridge):
@@ -51,10 +32,10 @@ def test_degraded_paths_do_not_raise(no_secrets, bare_cfg):
     bridge = Bridge(bare_cfg)
     bridge._heartbeat()  # no Graph: skipped
     assert bridge._classify([], None, [], []) is None
+    imessage = bridge.transports.get("imessage")
     with pytest.raises(sqlite3.OperationalError):
-        bridge._start_rowid()  # chat.db missing: the watcher catches this and reports it
-    bridge.h_chatdb.degraded(sqlite3.OperationalError("unable to open database file"))
-    assert states(bridge)["chatdb"] == "degraded"
+        bridge.poll_once(imessage)  # chat.db missing: the watcher catches this; the transport reports it
+    assert states(bridge)["chatdb"] == "degraded" and "unable to open" in imessage.health.status.last_error
 
 
 def test_health_shown_on_dashboard(no_secrets, bare_cfg, monkeypatch):

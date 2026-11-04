@@ -11,7 +11,7 @@ A password-protected local dashboard controls who Mia talks to. Nothing listens 
 
 ```
 kinchat/
-  messages.py   chat.db reader + AppleScript sender       router.py    dashboard rules → filters → controls → cues → window → classifier
+  backends/     imessage.py (chat.db + AppleScript), fake.py router.py    dashboard rules → filters → controls → cues → window → classifier
   settings.py   features, contacts, chats, audit           outbound.py  can-speak check, quiet hours outbox, 6/10 min rate limit, shadow mode
   dashboard.py  Flask + plain HTML forms on 127.0.0.1:8770 tasks.py     [MIA-CHAT] handoff, [MIA-POST] acceptance rules
   llm.py        classifier + replier (structured output)   graph.py     app-only cert auth, inbox delta, mail, calendar snapshot
@@ -79,6 +79,9 @@ keeps working. `scripts/install.sh` stops the old `ai.atriel.mia-bridge` launchd
   *failed* in the dashboard's Health section (and in the heartbeat); a later error shows as *degraded* while it
   retries. Without a dashboard password the dashboard still starts, but sign-in is disabled until one is added.
   At startup the bridge asks Messages for its chat count once, so the Automation prompt appears.
+- **Chat transports:** chat IDs are namespaced `<transport>:<native id>` (e.g. `imessage:iMessage;+;chat123`), and
+  replies go out through the transport named by the prefix. `chat.transports` picks the transports (default
+  `[imessage]`). An existing `state.db` is upgraded in place by prefixing its stored IDs with `imessage:`.
 - **Restart:** the last processed `chat.db` row is saved; messages more than 5 minutes old when first seen
   are stored for context but not answered. The first run starts from the newest row, not from history.
 - **Results** post to the chat the task came from, never another chat; no STATUS line keeps the task open.

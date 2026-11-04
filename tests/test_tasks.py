@@ -64,7 +64,7 @@ def test_update_cannot_cross_chats(cfg, store):
     sent = []
     d = desk(cfg, store, sent)
     d.hand_off(req(), CHAT, "Alex")
-    t = d.hand_off(req("change it", update="T-0001"), "iMessage;-;+18005550101", "Sam")
+    t = d.hand_off(req("change it", update="T-0001"), "imessage:iMessage;-;+18005550101", "Sam")
     assert t.task_id == "T-0002"
 
 

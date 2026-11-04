@@ -61,6 +61,11 @@ class Messages:
 
 
 @dataclass
+class Chat:
+    transports: list[str] = field(default_factory=lambda: ["imessage"])  # imessage, fake
+
+
+@dataclass
 class Routing:
     window_minutes: int = 12
     respond_threshold: float = 0.75
@@ -122,6 +127,7 @@ class Assistant:
 @dataclass
 class Config:
     messages: Messages = field(default_factory=Messages)
+    chat: Chat = field(default_factory=Chat)
     routing: Routing = field(default_factory=Routing)
     replier: Replier = field(default_factory=Replier)
     dashboard: Dashboard = field(default_factory=Dashboard)
@@ -149,6 +155,7 @@ def load(path: Path) -> Config:
     raw = yaml.safe_load(Path(path).read_text()) or {}
     cfg = Config(
         messages=_section(Messages, raw.get("messages")),
+        chat=_section(Chat, raw.get("chat")),
         routing=_section(Routing, raw.get("routing")),
         replier=_section(Replier, raw.get("replier")),
         dashboard=_section(Dashboard, raw.get("dashboard")),
@@ -165,6 +172,11 @@ def load(path: Path) -> Config:
         raise ValueError(f"config: default_country must be one of {', '.join(CALLING_CODES)}")
     if cfg.dashboard.bind not in ("127.0.0.1", "localhost", "::1"):
         raise ValueError("config: dashboard.bind must be a loopback address")
+    known = {"imessage", "fake"}
+    cfg.chat.transports = list(cfg.chat.transports or [])
+    bad = [t for t in cfg.chat.transports if t not in known]
+    if bad or not cfg.chat.transports:
+        raise ValueError(f"config: chat.transports must list some of {', '.join(sorted(known))}")
     a = cfg.assistant
     if not a.name.strip() or not a.tag.strip():
         raise ValueError("config: assistant.name and assistant.tag must not be empty")

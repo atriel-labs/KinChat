@@ -125,8 +125,20 @@ def _v1(db: sqlite3.Connection) -> None:
             db.execute(f"ALTER TABLE decisions ADD COLUMN {col} {kind}")
 
 
+# Every table that stores a chat ID. Chat IDs are namespaced "<transport>:<native id>" from v2 on.
+CHAT_ID_COLUMNS = (("chats", "chat_guid"), ("messages", "chat_guid"), ("window", "chat_guid"),
+                   ("tasks", "chat_guid"), ("outbox", "chat_guid"), ("notes", "chat_guid"))
+
+
+def _v2(db: sqlite3.Connection) -> None:
+    """Namespace chat IDs: everything stored so far came from iMessage, so "iMessage;+;x" becomes
+    "imessage:iMessage;+;x". Native iMessage GUIDs never contain ":", so already-prefixed rows are left alone."""
+    for table, col in CHAT_ID_COLUMNS:
+        db.execute(f"UPDATE {table} SET {col} = 'imessage:' || {col} WHERE {col} IS NOT NULL AND instr({col}, ':') = 0")
+
+
 # MIGRATIONS[i] takes a database from user_version i to i + 1. Append only.
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1]
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 

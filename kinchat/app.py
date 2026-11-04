@@ -1,4 +1,4 @@
-"""Wire the bridge together: chat.db watcher, router/replier, outbound, result poller, calendar, heartbeat, dashboard.
+"""Wire the bridge together: chat transports, router/replier, outbound, result poller, calendar, heartbeat, dashboard.
 
 Each subsystem starts on its own. A missing secret, missing Graph config or missing macOS permission
 switches that part off and shows up in the dashboard's Health section; it never stops the bridge
@@ -13,11 +13,11 @@ import time
 from datetime import datetime
 
 from . import secrets
+from .backends.base import ChatTransport, Incoming, TransportRegistry
 from .config import Config
 from .dashboard import create_app
 from .health import HealthBoard
 from .llm import LLM, Classification, Reply
-from .messages import ChatDB, Incoming, messages_scriptable, send_text
 from .outbound import Outbound
 from .router import Decision, Router
 from .settings import Notes, Settings
@@ -33,35 +33,47 @@ class Bridge:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.store = Store(cfg.db_path)
-        self.settings = Settings(self.store, cfg.default_country)
+        self.transports = TransportRegistry(self._make_transports())
+        self.settings = Settings(self.store, cfg.default_country, self.transports.is_group)
         self.notes = Notes(self.store, self.settings, cfg.family_md)
         self.calendar = ""
         self.last_chatdb_read: float | None = None
 
         self.health = HealthBoard()
-        self.h_chatdb = self.health.add("chatdb", "chat.db watcher")
-        self.h_messages = self.health.add("messages", "Messages sending (Automation)")
+        for t in self.transports:
+            self.health.register(t.health)
+            if getattr(t, "send_health", None) is not None:
+                self.health.register(t.send_health)
         self.h_llm = self.health.add("llm", "Claude API")
         self.h_mail = self.health.add("mail", "Task mail (Graph)")
         self.h_calendar = self.health.add("calendar", "Calendar (Graph)")
         self.h_dashboard = self.health.add("dashboard", "Dashboard password")
 
-        self.chatdb = ChatDB(cfg.messages.chat_db)  # opened lazily; the watcher reports whether it can be read
-        self.h_chatdb.degraded("not read yet")
-        self.h_messages.degraded("not checked yet")
         self.llm = self._start_llm()
         self.graph = self._start_graph()
         self.dashboard_password = self._dashboard_password()
 
         rp = cfg.replier
-        self.outbound = Outbound(self.store, self.settings, self._send_text, rp.max_msgs_per_10min,
+        # Outbound sends through the registry, which routes each chat ID to its transport by prefix.
+        self.outbound = Outbound(self.store, self.settings, self.transports.send, rp.max_msgs_per_10min,
                                  cfg.routing.window_minutes, cfg.shadow_mode, cfg.tz,
                                  cfg.quiet_hours.start, cfg.quiet_hours.end)
-        self.router = Router(cfg, self.store, self.settings, self._classify, self.chatdb.participants)
+        self.router = Router(cfg, self.store, self.settings, self._classify, self.transports.participants)
         self.desk = TaskDesk(cfg, self.store, self._send_mail if self.graph else None)
         self.poller = ResultPoller(cfg, self.store, self.graph, self.outbound.post)
 
     # --- startup ----------------------------------------------------------
+
+    def _make_transports(self) -> list[ChatTransport]:
+        out: list[ChatTransport] = []
+        for name in self.cfg.chat.transports:
+            if name == "imessage":
+                from .backends.imessage import IMessageTransport
+                out.append(IMessageTransport(self.cfg.messages.chat_db, self.store))
+            elif name == "fake":
+                from .backends.fake import FakeTransport
+                out.append(FakeTransport())
+        return out
 
     def _start_llm(self) -> LLM | None:
         rp, a = self.cfg.replier, self.cfg.assistant
@@ -108,15 +120,11 @@ class Bridge:
         self.h_dashboard.ok()
         return pw
 
-    def _check_messages(self) -> None:
-        """Ask Messages for its chat count once, so macOS shows the Automation prompt at startup."""
-        try:
-            n = messages_scriptable()
-        except Exception as e:
-            self.h_messages.failed(e)
-            return
-        self.h_messages.ok()
-        log.info("Messages is scriptable (%d chats)", n)
+    def _check_transports(self) -> None:
+        for t in self.transports:
+            check = getattr(t, "check_scriptable", None)
+            if check:
+                check()
 
     # --- subsystem calls that report health -------------------------------
 
@@ -132,14 +140,6 @@ class Bridge:
         else:
             self.h_llm.ok()
         return result
-
-    def _send_text(self, chat_guid: str, text: str) -> None:
-        try:
-            send_text(chat_guid, text)
-        except Exception as e:
-            self.h_messages.degraded(e)
-            raise
-        self.h_messages.ok()
 
     def _send_mail(self, subject: str, body: str) -> str | None:
         try:
@@ -192,32 +192,26 @@ class Bridge:
             if added:
                 log.info("%d note suggestion(s) waiting in the dashboard", added)
 
-    def _start_rowid(self) -> int:
-        last = self.store.kv_get("chatdb_last_rowid")
-        if last is None:
-            last = str(self.chatdb.max_rowid())  # first run: start from now, not from history
-            self.store.kv_set("chatdb_last_rowid", last)
-        return int(last)
+    def poll_once(self, transport: ChatTransport) -> int:
+        """Handle everything the transport has; returns how many messages were handled."""
+        n = 0
+        for inc in transport.poll():
+            try:
+                self.handle(inc)
+            except Exception:
+                log.exception("failed handling %s", inc.guid)
+            transport.ack(inc)
+            n += 1
+        return n
 
-    def _watch_chatdb(self) -> None:
-        rowid = None
+    def _watch(self, transport: ChatTransport) -> None:
         while True:
             try:
-                if rowid is None:
-                    rowid = self._start_rowid()
-                for inc in self.chatdb.new_messages(rowid):
-                    try:
-                        self.handle(inc)
-                    except Exception:
-                        log.exception("failed handling %s", inc.guid)
-                    rowid = inc.rowid
-                    self.store.kv_set("chatdb_last_rowid", str(rowid))
+                self.poll_once(transport)
                 self.last_chatdb_read = time.time()
-                self.h_chatdb.ok()
-            except Exception as e:
-                log.exception("reading chat.db failed (Full Disk Access?)")
-                self.h_chatdb.degraded(e)
-                self.chatdb.reset()
+            except Exception:
+                log.exception("reading from %s failed%s", transport.name,
+                              " (Full Disk Access?)" if transport.name == "imessage" else "")
                 time.sleep(10)
             time.sleep(self.cfg.messages.poll_seconds)
 
@@ -270,8 +264,9 @@ class Bridge:
 
     def start_background(self) -> None:
         g = self.cfg.graph
-        threading.Thread(target=self._check_messages, name="messages-check", daemon=True).start()
-        threading.Thread(target=self._watch_chatdb, name="chatdb", daemon=True).start()
+        threading.Thread(target=self._check_transports, name="transport-check", daemon=True).start()
+        for t in self.transports:
+            threading.Thread(target=self._watch, args=(t,), name=f"watch-{t.name}", daemon=True).start()
         self._every(5, self.outbound.tick, "outbound")
         if self.graph is not None:
             self._every(g.poll_seconds, self.poller.poll_once, "inbox-poll", self.h_mail)

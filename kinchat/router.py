@@ -7,9 +7,9 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from .backends.base import Incoming
 from .config import Config
 from .llm import Classification
-from .messages import Incoming
 from .settings import Contact, Settings
 from .store import Message, Store, Task
 

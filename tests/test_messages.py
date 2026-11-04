@@ -1,6 +1,6 @@
 import sqlite3
 
-from kinchat.messages import APPLE_EPOCH, ChatDB, apple_ts, decode_attributed_body
+from kinchat.backends.imessage import APPLE_EPOCH, ChatDB, apple_ts, decode_attributed_body
 
 SCHEMA = """
 CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);
@@ -49,6 +49,7 @@ def test_reads_new_messages(tmp_path):
     msgs = db.new_messages(0)
     assert [m.guid for m in msgs] == ["g1", "g2", "g3", "g5"]  # system row skipped
     g1, g2, g3, g5 = msgs
+    assert g1.chat_guid == "imessage:iMessage;+;chat123" and g1.transport == "imessage"
     assert g1.is_group and g1.chat_name == "Family" and g1.handle == "+18005550100"
     assert g1.ts == 1_762_000_000
     assert g2.text.startswith("from attributedBody") and len(g2.text) == 220 and g2.thread_originator_guid == "g1"

@@ -14,7 +14,10 @@ assistant:
 # Log routing decisions and draft replies without sending anything. Leave on for 2-3 days, then set false.
 shadow_mode: true
 
-messages:
+chat:
+  transports: [imessage]   # chat networks to read and post to; "fake" is an in-memory one for trying things out
+
+messages:                  # the imessage transport
   chat_db: ~/Library/Messages/chat.db
   poll_seconds: 2
 

@@ -34,10 +34,11 @@ def cmd_run(cfg: config_mod.Config) -> int:
 
 
 def cmd_chats(cfg: config_mod.Config) -> int:
-    from .messages import ChatDB
+    from .backends.base import make_id
+    from .backends.imessage import NAME, ChatDB
     for c in ChatDB(cfg.messages.chat_db).list_chats():
         kind = "group" if c["is_group"] else "1:1"
-        print(f"{c['guid']}\t{kind}\t{c['name'] or ''}\t{', '.join(c['participants'])}")
+        print(f"{make_id(NAME, c['guid'])}\t{kind}\t{c['name'] or ''}\t{', '.join(c['participants'])}")
     return 0
 
 
@@ -55,7 +56,7 @@ def cmd_check(cfg: config_mod.Config) -> int:
 
     import anthropic
 
-    from .messages import ChatDB, messages_scriptable
+    from .backends.imessage import ChatDB, messages_scriptable
 
     print(f"shadow_mode={cfg.shadow_mode}, dashboard http://{cfg.dashboard.bind}:{cfg.dashboard.port}")
     step("family.md", lambda: f"{len(cfg.family_md.read_text())} chars")

@@ -1,4 +1,4 @@
-"""Messages adapter: read new rows from chat.db, send text to a chat ID by AppleScript.
+"""iMessage transport: read new rows from chat.db, send text to a chat ID by AppleScript.
 
 Reading chat.db needs Full Disk Access for the Python binary the launchd agent runs;
 sending needs Automation permission to control Messages. Both are granted once,
@@ -9,10 +9,15 @@ from __future__ import annotations
 import logging
 import sqlite3
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 
+from ..health import Health
+from .base import Incoming, make_id, split_id
+
 log = logging.getLogger(__name__)
+
+NAME = "imessage"
+BOOKMARK_KEY = "chatdb_last_rowid"  # kv key; unchanged from before transports so a live install resumes in place
 
 APPLE_EPOCH = 978307200  # 2001-01-01 in Unix time
 STYLE_GROUP = 43
@@ -38,21 +43,6 @@ WHERE m.ROWID > ?
 ORDER BY m.ROWID
 LIMIT 200
 """
-
-
-@dataclass
-class Incoming:
-    rowid: int
-    guid: str
-    chat_guid: str
-    is_group: bool
-    chat_name: str | None
-    handle: str | None
-    text: str
-    is_from_me: bool
-    ts: float
-    thread_originator_guid: str | None
-    is_tapback: bool
 
 
 def apple_ts(date: int | None) -> float:
@@ -112,7 +102,7 @@ class ChatDB:
             out.append(Incoming(
                 rowid=r["rowid"],
                 guid=r["guid"],
-                chat_guid=r["chat_guid"],
+                chat_guid=make_id(NAME, r["chat_guid"]),
                 is_group=r["style"] == STYLE_GROUP,
                 chat_name=r["display_name"] or None,
                 handle=r["handle"],
@@ -121,6 +111,7 @@ class ChatDB:
                 ts=apple_ts(r["date"]),
                 thread_originator_guid=r["thread_originator_guid"] or None,
                 is_tapback=bool(r["associated_message_type"]),
+                transport=NAME,
             ))
         return out
 
@@ -151,3 +142,74 @@ def messages_scriptable(timeout: float = 20) -> int:
     if r.returncode != 0:
         raise RuntimeError(r.stderr.strip() or "osascript failed")
     return int(r.stdout.strip() or 0)
+
+
+def is_group_id(native_guid: str) -> bool:
+    """Group chat GUIDs look like "iMessage;+;chat123"; one-on-one ones like "iMessage;-;+18005550100"."""
+    return ";+;" in native_guid
+
+
+class IMessageTransport:
+    """chat.db + Messages.app. Owns the chat.db bookmark (the last handled ROWID)."""
+
+    name = NAME
+
+    def __init__(self, chat_db: Path | str, store, send=send_text, scriptable=messages_scriptable):
+        self.db = ChatDB(chat_db)
+        self._store = store
+        self._send = send
+        self._scriptable = scriptable
+        self._rowid: int | None = None
+        self.health = Health("chatdb", "chat.db watcher")
+        self.send_health = Health("messages", "Messages sending (Automation)")
+        self.health.degraded("not read yet")
+        self.send_health.degraded("not checked yet")
+
+    def _bookmark(self) -> int:
+        if self._rowid is None:
+            last = self._store.kv_get(BOOKMARK_KEY)
+            if last is None:
+                last = str(self.db.max_rowid())  # first run: start from now, not from history
+                self._store.kv_set(BOOKMARK_KEY, last)
+            self._rowid = int(last)
+        return self._rowid
+
+    def poll(self) -> list[Incoming]:
+        try:
+            msgs = self.db.new_messages(self._bookmark())
+        except Exception as e:
+            self.health.degraded(e)
+            self.db.reset()
+            raise
+        self.health.ok()
+        return msgs
+
+    def ack(self, inc: Incoming) -> None:
+        if self._rowid is None or inc.rowid > self._rowid:
+            self._rowid = inc.rowid
+            self._store.kv_set(BOOKMARK_KEY, str(inc.rowid))
+
+    def send(self, chat_id: str, text: str) -> None:
+        _, native = split_id(chat_id)
+        try:
+            self._send(native, text)
+        except Exception as e:
+            self.send_health.degraded(e)
+            raise
+        self.send_health.ok()
+
+    def participants(self, chat_id: str) -> list[str]:
+        return self.db.participants(split_id(chat_id)[1])
+
+    def is_group(self, chat_id: str) -> bool:
+        return is_group_id(split_id(chat_id)[1])
+
+    def check_scriptable(self) -> None:
+        """Ask Messages for its chat count once, so macOS shows the Automation prompt at startup."""
+        try:
+            n = self._scriptable()
+        except Exception as e:
+            self.send_health.failed(e)
+            return
+        self.send_health.ok()
+        log.info("Messages is scriptable (%d chats)", n)
