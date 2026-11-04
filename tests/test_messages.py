@@ -23,9 +23,9 @@ def typedstream(s: str) -> bytes:
 def make_db(path):
     db = sqlite3.connect(path)
     db.executescript(SCHEMA)
-    db.executemany("INSERT INTO handle VALUES (?, ?)", [(1, "+13035550100"), (2, "+13035550101")])
+    db.executemany("INSERT INTO handle VALUES (?, ?)", [(1, "+18005550100"), (2, "+18005550101")])
     db.executemany("INSERT INTO chat VALUES (?, ?, ?, ?)",
-                   [(1, "iMessage;+;chat123", 43, "Family"), (2, "iMessage;-;+13035550100", 45, "")])
+                   [(1, "iMessage;+;chat123", 43, "Family"), (2, "iMessage;-;+18005550100", 45, "")])
     db.executemany("INSERT INTO chat_handle_join VALUES (?, ?)", [(1, 1), (1, 2), (2, 1)])
     ns = (1_762_000_000 - APPLE_EPOCH) * 1_000_000_000
     rows = [
@@ -49,14 +49,14 @@ def test_reads_new_messages(tmp_path):
     msgs = db.new_messages(0)
     assert [m.guid for m in msgs] == ["g1", "g2", "g3", "g5"]  # system row skipped
     g1, g2, g3, g5 = msgs
-    assert g1.is_group and g1.chat_name == "Family" and g1.handle == "+13035550100"
+    assert g1.is_group and g1.chat_name == "Family" and g1.handle == "+18005550100"
     assert g1.ts == 1_762_000_000
     assert g2.text.startswith("from attributedBody") and len(g2.text) == 220 and g2.thread_originator_guid == "g1"
     assert g3.is_tapback
     assert not g5.is_group
     assert db.new_messages(5) == []
     assert db.max_rowid() == 5
-    assert db.participants("iMessage;+;chat123") == ["+13035550100", "+13035550101"]
+    assert db.participants("iMessage;+;chat123") == ["+18005550100", "+18005550101"]
 
 
 def test_decode_helpers():

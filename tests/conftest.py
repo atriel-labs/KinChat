@@ -9,8 +9,8 @@ from kinchat.settings import Settings
 from kinchat.store import Store
 
 CHAT = "iMessage;+;chat123"
-ALEX = "+13035550100"
-SAM = "+13035550101"
+ALEX = "+18005550100"
+SAM = "+18005550101"
 DM_ALEX = f"iMessage;-;{ALEX}"
 
 

@@ -73,7 +73,7 @@ keeps working. `scripts/install.sh` stops the old `ai.atriel.mia-bridge` launchd
   arrived in the last 2 hours, tell the owner the iMessage bridge may be down. Never reply to heartbeat emails."*
 - **Controls** ("sit this one out" / "you're back") get a fixed one-line ack. **Closing phrases** close the window, no reply.
 - **Phone numbers** without a `+` are read as national numbers in `default_country` (US by default; also CA, GB,
-  AU, NZ, DE), so `303-555-0100` and `+1 303 555 0100` match, but a foreign number ending in the same digits does not.
+  AU, NZ, DE), so `800-555-0100` and `+1 800 555 0100` match, but a foreign number ending in the same digits does not.
 - **Health:** each part (chat.db watcher, Messages sending, Claude API, Graph task mail, calendar, dashboard
   password) starts on its own. A missing secret, Graph config or permission turns that part off and shows as
   *failed* in the dashboard's Health section (and in the heartbeat); a later error shows as *degraded* while it

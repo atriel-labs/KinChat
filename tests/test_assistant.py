@@ -82,7 +82,7 @@ def test_own_messages_use_custom_name(cfg, store, settings):
 
 
 def test_custom_handles_are_not_strangers(cfg, store, settings):
-    r, _ = make(robin(cfg), store, settings, cls(), members=("+13035550100", "+13035550101", "Robin@Example.com"))
+    r, _ = make(robin(cfg), store, settings, cls(), members=("+18005550100", "+18005550101", "Robin@Example.com"))
     assert r.route(incoming("Robin, hi")).respond
 
 

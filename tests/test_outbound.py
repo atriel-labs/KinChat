@@ -48,8 +48,8 @@ def test_quiet_hours_hold_until_morning(store, settings):
 
 def test_urgent_bypasses_quiet_hours(store, settings):
     sent, clock = [], Clock(hour=2)
-    assert make(store, settings, clock, sent).post(CHAT, "The pharmacy is 303-555-0199", urgent=True) == "sent"
-    assert sent == [(CHAT, "The pharmacy is 303-555-0199")]
+    assert make(store, settings, clock, sent).post(CHAT, "The pharmacy is 800-555-0199", urgent=True) == "sent"
+    assert sent == [(CHAT, "The pharmacy is 800-555-0199")]
 
 
 def test_quiet_hours_toggle_off(store, settings):

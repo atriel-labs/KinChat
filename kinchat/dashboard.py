@@ -73,7 +73,7 @@ PAGE = """<!doctype html>
 {% endfor %}
 <tr><form method="post" action="{{ url_for('add_contact') }}"><input type="hidden" name="csrf" value="{{ csrf }}">
 <td><input type="text" name="name" placeholder="Name" required></td>
-<td><input type="text" name="handles" placeholder="+13035550100, name@example.com" required></td>
+<td><input type="text" name="handles" placeholder="+18005550100, name@example.com" required></td>
 <td><input type="checkbox" name="one_on_one"></td><td><input type="checkbox" name="can_assign" checked></td>
 <td><button>Add</button></td></form></tr>
 </table>

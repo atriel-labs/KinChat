@@ -15,7 +15,7 @@ class FakeClassifier:
         return self.result
 
 
-def make(cfg, store, settings, result=None, members=("+13035550100", SAM)):
+def make(cfg, store, settings, result=None, members=("+18005550100", SAM)):
     fc = FakeClassifier(result)
     return Router(cfg, store, settings, fc, lambda guid: list(members)), fc
 
@@ -51,7 +51,7 @@ def test_unapproved_sender_ignored(cfg, store, settings):
 
 
 def test_stranger_added_to_approved_group_sends_it_back_to_pending(cfg, store, settings):
-    r, fc = make(cfg, store, settings, cls(), members=("+13035550100", SAM, "+19995550000"))
+    r, fc = make(cfg, store, settings, cls(), members=("+18005550100", SAM, "+19995550000"))
     d = r.route(incoming("Mia, are we free Saturday?"))
     assert not d.respond and fc.calls == 0
     chat = settings.get_chat(CHAT)
@@ -62,12 +62,12 @@ def test_stranger_added_to_approved_group_sends_it_back_to_pending(cfg, store, s
 
 def test_mia_own_handle_is_not_a_stranger(cfg, store, settings):
     cfg.assistant.handles = ["mia@example.com"]  # the bridge's own iMessage address
-    r, _ = make(cfg, store, settings, cls(), members=("+13035550100", SAM, "mia@example.com"))
+    r, _ = make(cfg, store, settings, cls(), members=("+18005550100", SAM, "mia@example.com"))
     assert r.route(incoming("Mia, hi")).respond
 
 
 def test_contact_change_applies_immediately(cfg, store, settings):
-    r, _ = make(cfg, store, settings, cls(), members=("+13035550100", SAM, "+19995550000"))
+    r, _ = make(cfg, store, settings, cls(), members=("+18005550100", SAM, "+19995550000"))
     settings.add_contact("Gran", ["+19995550000"], one_on_one=False, can_assign=False)
     assert r.route(incoming("Mia, hi", handle="+1 (999) 555-0000")).respond
 
