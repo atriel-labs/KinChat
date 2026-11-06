@@ -19,14 +19,19 @@ def test_short_value_via_prompt_and_read_back(fake):
     assert call[-1] == "-w" and "s3cret" not in " ".join(call)
 
 
-def test_long_value_via_stdin_and_read_back(fake):
+def test_long_value_in_chunks_and_read_back(fake):
     value = "QUJD" * 1024  # 4096 characters, like a base64 Graph certificate key
     keychain.store("graph-cert-key-b64", value, service="svc")
-    assert fake.keychain()["svc/graph-cert-key-b64"] == value
-    assert all(value not in " ".join(c) for c in fake.calls())  # not on any argv
+    kc = fake.keychain()
+    assert kc["svc/graph-cert-key-b64"] == "kinchat-chunks:41"
+    assert all(len(kc[f"svc/graph-cert-key-b64#{i}"]) <= keychain.CHUNK for i in range(1, 42))
+    assert keychain.read("graph-cert-key-b64", "svc") == value
+    assert all("QUJDQUJD" not in " ".join(c) for c in fake.calls())  # no piece on any argv
+    keychain.store("graph-cert-key-b64", "short now", service="svc")  # shrinking back to one item
+    assert keychain.read("graph-cert-key-b64", "svc") == "short now"
     urls = " ".join(f"https://cal.example.com/{i:04d}.ics" for i in range(30))
     keychain.store("ics-urls", urls, service="svc")
-    assert fake.keychain()["svc/ics-urls"] == urls
+    assert keychain.read("ics-urls", "svc") == urls
 
 
 def test_exit_without_prompting_is_an_error(fake):
@@ -46,7 +51,7 @@ def test_truncated_write_is_caught_by_read_back(fake):
     fake.mode("truncate")
     with pytest.raises(keychain.KeychainError, match="did not read back correctly"):
         keychain.store("acct", "a-longer-value", service="svc")
-    with pytest.raises(keychain.KeychainError, match="1000 of 4096"):
+    with pytest.raises(keychain.KeychainError, match="did not read back correctly"):
         keychain.store("graph-cert-key-b64", "QUJD" * 1024, service="svc")
 
 
@@ -67,9 +72,16 @@ def test_read_back_compare_without_security():
     assert keychain.read("acct", "kinchat", run=run) == "abcde"
 
 
-def test_quotes_rejected_in_long_values(fake):
-    with pytest.raises(keychain.KeychainError, match="quotes"):
-        keychain.store("acct", '"' + "x" * 600, service="svc")
+def test_reads_reassemble_and_report_missing_chunks(fake):
+    fake.set_secret("svc", "acct", "kinchat-chunks:2")
+    fake.set_secret("svc", "acct#1", "ab")
+    assert keychain.read("acct", "svc") is None  # chunk 2 missing: incomplete, not a partial secret
+    fake.set_secret("svc", "acct#2", "cd")
+    assert keychain.read("acct", "svc") == "abcd"
+    from kinchat import secrets
+    assert secrets.read_item("svc", "acct") == "abcd"
+    with pytest.raises(keychain.KeychainError, match="can't start with"):
+        keychain.store("acct", "kinchat-chunks:9", service="svc")
 
 
 def test_migrate_stops_before_touching_anything_if_a_copy_does_not_verify(tmp_path, fake):

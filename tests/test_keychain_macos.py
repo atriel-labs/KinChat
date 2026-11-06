@@ -8,8 +8,6 @@ import pytest
 
 from kinchat import keychain
 
-PTY_LIMIT = keychain.PTY_MAX
-
 pytestmark = pytest.mark.skipif(sys.platform != "darwin" or os.environ.get("KINCHAT_KEYCHAIN_TEST") != "1",
                                 reason="needs macOS and KINCHAT_KEYCHAIN_TEST=1")
 
@@ -42,10 +40,19 @@ def test_store_answers_the_real_prompt_and_reads_back(throwaway_keychain):
 
 
 @pytest.mark.parametrize("value", [
-    "QUJD" * 1024,                                                           # 4096-char base64 (Graph key)
+    "QUJD" * 1024,                                                              # 4096-char base64 (Graph key)
     " ".join(f"https://cal.example.com/feed-{i:04d}.ics" for i in range(100)),  # a long ICS URL list, spaces
-    "p" * PTY_LIMIT,                                                         # the longest value typed at the prompt
-], ids=["base64-4096", "urls-with-spaces", "prompt-limit"])
+    "p" * keychain.CHUNK,                                                       # the longest single item
+    "q" * (keychain.CHUNK + 1),                                                 # the shortest chunked one
+], ids=["base64-4096", "urls-with-spaces", "one-item-limit", "two-chunks"])
 def test_long_values_round_trip_exactly(throwaway_keychain, value):
     keychain.store("long-account", value, service="kinchat-test")  # raises if the read-back differs
     assert keychain.read("long-account", "kinchat-test") == value
+
+
+def test_prompt_really_truncates_at_128(throwaway_keychain):
+    """Why chunks exist: what the prompt silently does to a longer value (caught by the read-back)."""
+    with pytest.raises(keychain.KeychainError, match="128 of 200"):
+        keychain._store_one("raw", "r" * 200, "kinchat-test", keychain.answer_prompts)
+        stored = keychain.read("raw", "kinchat-test")
+        raise keychain.KeychainError(f"read back {len(stored)} of 200")

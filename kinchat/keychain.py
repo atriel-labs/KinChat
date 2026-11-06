@@ -1,6 +1,7 @@
 """Write secrets to the login Keychain with macOS `security`, without putting them on a command line.
 
 Every write is read back and compared, so a truncated or failed write is an error, never a silent success.
+`security` keeps at most 128 characters typed at its prompt, so long values are stored in numbered chunks.
 
 `security add-generic-password ... -w <value>` would show the value to every process on the Mac (`ps`) while
 it runs. Instead `-w` is given last with no value, which makes `security` prompt for the password on its
@@ -20,14 +21,14 @@ import subprocess
 import termios
 import time
 
-from .secrets import SERVICE
+from .secrets import CHUNK_MARK, SERVICE, read_item
 
 
 class KeychainError(RuntimeError):
     pass
 
 
-PTY_MAX = 512  # longer values go through `security -i` on stdin (no terminal line limit)
+CHUNK = 100  # `security`'s password prompt keeps at most 128 characters; longer values are stored in chunks
 
 
 def answer_prompts(cmd: list[str], value: str, timeout: float = 20.0) -> int:
@@ -87,37 +88,36 @@ def answer_prompts(cmd: list[str], value: str, timeout: float = 20.0) -> int:
     return code
 
 
-def feed_stdin(cmd: list[str], line: str, timeout: float = 20.0) -> int:
-    """Run cmd (security -i) with one command line on stdin. Returns the exit status."""
-    r = subprocess.run(cmd, input=line + "\nquit\n", capture_output=True, text=True, timeout=timeout)
-    return r.returncode
-
-
-def store(account: str, value: str, service: str = SERVICE, runner=answer_prompts, stdin_runner=feed_stdin,
-          run=subprocess.run) -> None:
-    """Create or update (-U) the generic password `service`/`account`, then read it back and compare.
-
-    Short values are typed at `security`'s own prompt through a pty. Longer ones (the base64 Graph key, a
-    list of calendar URLs) go to `security -i` as a command on stdin, quoted. Either way nothing is on argv
-    and /usr/bin/security creates the item. The read-back catches truncation or a silent failure."""
-    if "\n" in value or "\r" in value:
-        raise KeychainError(f"{account}: the value must be a single line")
-    if len(value) <= PTY_MAX:
-        code = runner(["security", "add-generic-password", "-U", "-s", service, "-a", account, "-w"], value)
-    else:
-        if '"' in value or "\\" in value:
-            raise KeychainError(f"{account}: a value over {PTY_MAX} characters can't contain quotes or backslashes")
-        code = stdin_runner(["security", "-i"],
-                            f'add-generic-password -U -s "{service}" -a "{account}" -w "{value}"')
+def _store_one(account: str, value: str, service: str, runner) -> None:
+    code = runner(["security", "add-generic-password", "-U", "-s", service, "-a", account, "-w"], value)
     if code != 0:
         raise KeychainError(f"could not store Keychain item {service}/{account} (security exit {code})")
-    stored = read(account, service, run=run)
+
+
+def store(account: str, value: str, service: str = SERVICE, runner=answer_prompts, run=subprocess.run) -> None:
+    """Create or update (-U) the generic password `service`/`account`, then read it back and compare.
+
+    The value is typed at `security`'s own prompt through a pty, which takes at most 128 characters. A
+    longer value (the base64 Graph key, a list of calendar URLs) is split into items "<account>#1".."#N" of
+    at most CHUNK characters each, and the item itself holds "kinchat-chunks:N"; secrets.get reassembles
+    it. Nothing is ever on argv, /usr/bin/security creates every item, and the read-back catches truncation
+    or any silent failure."""
+    if "\n" in value or "\r" in value:
+        raise KeychainError(f"{account}: the value must be a single line")
+    if value.startswith(CHUNK_MARK):
+        raise KeychainError(f"{account}: the value can't start with {CHUNK_MARK!r}")
+    if len(value) <= CHUNK:
+        _store_one(account, value, service, runner)
+    else:
+        chunks = [value[i:i + CHUNK] for i in range(0, len(value), CHUNK)]
+        for i, chunk in enumerate(chunks, 1):
+            _store_one(f"{account}#{i}", chunk, service, runner)
+        _store_one(account, f"{CHUNK_MARK}{len(chunks)}", service, runner)
+    stored = read_item(service, account, run=run)
     if stored != value:
         detail = "missing" if stored is None else f"{len(stored)} of {len(value)} characters"
         raise KeychainError(f"Keychain item {service}/{account} did not read back correctly ({detail})")
 
 
 def read(account: str, service: str, run=subprocess.run) -> str | None:
-    r = run(["security", "find-generic-password", "-s", service, "-a", account, "-w"],
-            capture_output=True, text=True)
-    return r.stdout.rstrip("\n") if r.returncode == 0 else None
+    return read_item(service, account, run=run)

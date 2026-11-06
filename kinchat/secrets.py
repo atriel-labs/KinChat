@@ -28,15 +28,34 @@ LEGACY_SERVICES = ("ai.atriel.mia-bridge",)
 LEGACY_ENV_PREFIXES = ("MIA_BRIDGE_",)
 
 
-def _keychain(service: str, account: str) -> str | None:
+CHUNK_MARK = "kinchat-chunks:"  # a long value is stored as "<account>#1".."#N"; the item itself says N
+
+
+def _raw(service: str, account: str, run=subprocess.run) -> str | None:
     try:
-        out = subprocess.run(
-            ["security", "find-generic-password", "-s", service, "-a", account, "-w"],
-            check=True, capture_output=True, text=True,
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
+        out = run(["security", "find-generic-password", "-s", service, "-a", account, "-w"],
+                  capture_output=True, text=True)
+    except FileNotFoundError:
         return None
-    return out.stdout.strip()
+    return out.stdout.rstrip("\n") if out.returncode == 0 else None
+
+
+def read_item(service: str, account: str, run=subprocess.run) -> str | None:
+    """One Keychain value, reassembled if it was stored in chunks. None if missing or incomplete."""
+    value = _raw(service, account, run)
+    if value is None or not value.startswith(CHUNK_MARK):
+        return value
+    try:
+        count = int(value[len(CHUNK_MARK):])
+    except ValueError:
+        return None
+    parts = [_raw(service, f"{account}#{i}", run) for i in range(1, count + 1)]
+    return None if any(p is None for p in parts) else "".join(parts)
+
+
+def _keychain(service: str, account: str) -> str | None:
+    value = read_item(service, account)
+    return value.strip() if value is not None else None
 
 
 def get(account: str) -> str:
