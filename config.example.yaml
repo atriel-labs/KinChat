@@ -53,7 +53,8 @@ tasks:
 #   archive_after_hours: 24      # finished tasks' sessions are archived after this
 
 calendar:
-  source: graph            # graph (graph.calendars below), ics (feed URLs in the Keychain account ics-urls) or none
+  source: graph            # graph (graph.calendars below), ics (feed URLs in the Keychain account ics-urls) or none;
+                           # ics expands recurring events when installed with the [ics] extra
   # owner_emails: [you@example.com]   # ics: leave out invites these attendees haven't accepted
   # days: 14               # defaults to graph.calendar_days
   # refresh_minutes: 15    # defaults to graph.calendar_refresh_minutes

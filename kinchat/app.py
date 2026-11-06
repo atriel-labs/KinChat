@@ -301,7 +301,17 @@ class Bridge:
         threading.Thread(target=loop, name=name, daemon=True).start()
 
     def _refresh_calendar(self) -> None:
-        self.calendar = self.calendar_source.snapshot()
+        h = self.h_calendar
+        try:
+            self.calendar = self.calendar_source.snapshot()
+        except Exception as e:
+            h.degraded(e)
+            raise
+        limitation = getattr(self.calendar_source, "limitation", None)
+        if limitation:
+            h.degraded(limitation)  # logged once: Health logs only when the state or message changes
+        else:
+            h.ok()
 
     def _prune(self) -> None:
         n = self.store.prune_messages(self.cfg.history_retention_days)
@@ -346,7 +356,7 @@ class Bridge:
             self._every(3600, self._heartbeat, "heartbeat")
         if self.calendar_source.name != "none" and self.h_calendar.state != "failed":
             minutes = self.cfg.calendar.refresh_minutes or g.calendar_refresh_minutes
-            self._every(minutes * 60, self._refresh_calendar, "calendar", self.h_calendar)
+            self._every(minutes * 60, self._refresh_calendar, "calendar")
         self._every(6 * 3600, self._prune, "prune")
 
     def run(self) -> None:

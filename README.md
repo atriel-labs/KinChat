@@ -20,8 +20,8 @@ kinchat/
 
 ## Setup
 
-Install with `pip install -e '.[graph]'` when you use Microsoft 365 (Graph task mail or calendar, the default);
-`msal` is only needed then. `scripts/install.sh` does this. New chat networks: see `docs/writing-a-transport.md`.
+Install with `pip install -e '.[graph,ics]'`: `[graph]` (msal) is needed for Microsoft 365 task mail or calendar,
+the default, and `[ics]` expands recurring events in ICS calendars. `scripts/install.sh` installs both. New chat networks: see `docs/writing-a-transport.md`.
 
 1. **Mac account.** Log in as the dedicated `mia` macOS user. Sign in to Messages with the assistant's own Apple ID.
    Turn on FileVault and the firewall ("Block all incoming connections"), and disable sleep.
@@ -99,8 +99,9 @@ keeps working. `scripts/install.sh` stops the old `ai.atriel.mia-bridge` launchd
   sessions are archived after 24 hours.
 - **Calendar sources:** `calendar.source` is `graph` (default), `ics` or `none`. ICS feed URLs are credentials, so
   they live in the Keychain account `ics-urls` (one per line) and are never logged. Invites that any
-  `calendar.owner_emails` attendee hasn't accepted or has declined are left out, as with Graph. Limitation: the
-  ICS parser doesn't expand recurring events (RRULE); only a series' first occurrence is shown, if it's in range.
+  `calendar.owner_emails` attendee hasn't accepted or has declined are left out, as with Graph, for every
+  occurrence. With the `[ics]` extra, recurring events are expanded (RRULE, RDATE, EXDATE, moved instances);
+  without it they aren't, and calendar health shows *degraded* until the extra is installed.
 - **Restart:** the last processed `chat.db` row is saved; messages more than 5 minutes old when first seen
   are stored for context but not answered. The first run starts from the newest row, not from history.
 - **Results** post to the chat the task came from, never another chat; no STATUS line keeps the task open.

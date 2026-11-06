@@ -1,11 +1,13 @@
 """ICS calendar feeds (e.g. a calendar's "secret address in iCal format") as a CalendarSource.
 
 The feed URLs carry access tokens, so they live in the Keychain (account ics-urls, one URL per line) and
-are never logged. Parsing uses a small stdlib parser.
+are never logged.
 
-Limitation: recurring events (RRULE) are not expanded; only the first occurrence of a series is seen, and
-only if it falls inside the window. EXDATE/RDATE are ignored; an overridden instance (RECURRENCE-ID) is its
-own VEVENT and shows up like any single event.
+With the optional extra (`pip install 'kinchat[ics]'`: icalendar + recurring-ical-events), recurring events
+are expanded inside the snapshot window: RRULE, RDATE and EXDATE, and a moved instance (RECURRENCE-ID)
+replaces its original slot. Without it a small stdlib parser is used, which does NOT expand recurring
+events (only a series' first occurrence is seen, if it falls in the window); calendar health then reads
+degraded with "recurring events not expanded; install kinchat[ics]".
 
 Events are dropped when any address in calendar.owner_emails is an attendee whose PARTSTAT is NEEDS-ACTION
 or DECLINED, mirroring the Graph rule that unanswered invites stay out of the prompt.
@@ -23,6 +25,16 @@ from .calendar import clean, format_event, section
 log = logging.getLogger(__name__)
 
 MAX_FEED_BYTES = 5_000_000
+NO_EXPANSION = "recurring events not expanded; install kinchat[ics]"
+
+
+def expansion_available() -> bool:
+    try:
+        import icalendar  # noqa: F401
+        import recurring_ical_events  # noqa: F401
+    except ImportError:
+        return False
+    return True
 UNANSWERED = {"NEEDS-ACTION", "DECLINED"}
 
 
@@ -206,15 +218,63 @@ def snapshot_lines(events: list[Event], owner_emails: list[str], tz: ZoneInfo, s
     return lines
 
 
+def _expanded_events(text: str, default_tz: ZoneInfo, start: datetime, end: datetime) -> tuple[str | None, list[Event]]:
+    """Every occurrence overlapping [start, end), using icalendar + recurring-ical-events."""
+    import icalendar
+    import recurring_ical_events
+
+    cal = icalendar.Calendar.from_ical(text)
+    name = cal.get("X-WR-CALNAME")
+    cal_tz = _zone(str(cal.get("X-WR-TIMEZONE")) if cal.get("X-WR-TIMEZONE") else None, default_tz)
+
+    def aware(value) -> tuple[datetime, bool]:
+        if isinstance(value, datetime):
+            return (value if value.tzinfo else value.replace(tzinfo=cal_tz)), False
+        return datetime.combine(value, time(0), cal_tz), True  # a DATE: all day
+
+    events = []
+    query = recurring_ical_events.of(cal, skip_bad_series=True)
+    for comp in query.between(start, end):
+        try:
+            s, all_day = aware(comp.decoded("DTSTART"))
+            if comp.get("DTEND") is not None:
+                e, _ = aware(comp.decoded("DTEND"))
+            elif comp.get("DURATION") is not None:
+                e = s + comp.decoded("DURATION")
+            else:
+                e = s + (timedelta(days=1) if all_day else timedelta(0))
+        except (KeyError, ValueError, TypeError):
+            continue
+        atts = comp.get("ATTENDEE") or []
+        if not isinstance(atts, list):
+            atts = [atts]
+        attendees = {}
+        for a in atts:
+            addr = str(a)
+            addr = addr.split(":", 1)[1] if addr.lower().startswith("mailto:") else addr
+            attendees[addr.strip().lower()] = str(a.params.get("PARTSTAT", "NEEDS-ACTION")).upper()
+        transp, status = comp.get("TRANSP"), comp.get("STATUS")
+        events.append(Event(start=s, end=e, all_day=all_day, summary=str(comp.get("SUMMARY") or ""),
+                            location=str(comp.get("LOCATION") or ""),
+                            busy="free" if transp and str(transp).upper() == "TRANSPARENT" else "busy",
+                            cancelled=bool(status) and str(status).upper() == "CANCELLED",
+                            recurring=comp.get("RRULE") is not None, attendees=attendees))
+    return (str(name) if name else None), events
+
+
 class IcsCalendar:
     name = "ics"
 
-    def __init__(self, urls: list[str], owner_emails: list[str], tz: ZoneInfo, days: int, fetch=None):
+    def __init__(self, urls: list[str], owner_emails: list[str], tz: ZoneInfo, days: int, fetch=None,
+                 expand: bool | None = None):
         self.urls = [u.strip() for u in urls if u.strip()]
         self.owner_emails = owner_emails
         self.tz = tz
         self.days = days
         self._fetch = fetch or self._http_get
+        self.expand = expansion_available() if expand is None else expand
+        # Shown as calendar health after a successful refresh without the [ics] extra.
+        self.limitation = None if self.expand else NO_EXPANSION
         self.health = Health("calendar", "Calendar (ICS)")
 
     @staticmethod
@@ -235,7 +295,9 @@ class IcsCalendar:
         sections = []
         for i, url in enumerate(self.urls, 1):
             try:
-                name, events = parse_calendar(self._fetch(url), self.tz)
+                text = self._fetch(url)
+                name, events = (_expanded_events(text, self.tz, start, end) if self.expand
+                                else parse_calendar(text, self.tz))
             except Exception as e:
                 # Never log the URL: it is a credential.
                 raise RuntimeError(f"calendar feed {i}: {type(e).__name__}") from None
