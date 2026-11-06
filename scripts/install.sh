@@ -7,8 +7,6 @@ APP="$HOME/Library/Application Support/kinchat"
 LEGACY_APP="$HOME/Library/Application Support/mia-bridge"
 LOGS="$HOME/Library/Logs/kinchat"
 LABEL="io.kinchat.bridge"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-LEGACY_PLIST="$HOME/Library/LaunchAgents/ai.atriel.mia-bridge.plist"
 PY="${PYTHON:-$(command -v python3.13 || command -v python3.12 || echo /opt/homebrew/bin/python3.13)}"
 
 # An install made before the rename keeps its config and state where they are (kinchat looks there too).
@@ -16,7 +14,7 @@ if [[ -d "$LEGACY_APP" && ! -e "$APP" ]]; then
   APP="$LEGACY_APP"
 fi
 
-mkdir -p "$APP" "$LOGS" "$HOME/Library/LaunchAgents"
+mkdir -p "$APP" "$LOGS"
 
 if [[ ! -d "$PROJECT/.venv" ]]; then
   "$PY" -m venv "$PROJECT/.venv"
@@ -28,19 +26,8 @@ fi
 [[ -f "$APP/config.yaml" ]] || cp "$PROJECT/config.example.yaml" "$APP/config.yaml"
 [[ -f "$APP/family.md" ]] || cp "$PROJECT/family.example.md" "$APP/family.md"
 
-sed -e "s|__VENV__|$PROJECT/.venv|g" -e "s|__PROJECT__|$PROJECT|g" -e "s|__HOME__|$HOME|g" \
-  "$PROJECT/launchd/$LABEL.plist.template" > "$PLIST"
-
-# Stop the agent from before the rename so two bridges never run at once, and keep its plist for rollback.
-if [[ -f "$LEGACY_PLIST" ]]; then
-  launchctl bootout "gui/$(id -u)" "$LEGACY_PLIST" 2>/dev/null || true
-  mv -f "$LEGACY_PLIST" "$LEGACY_PLIST.disabled"
-  echo "Stopped the old ai.atriel.mia-bridge agent. To roll back to it:"
-  echo "  launchctl bootout gui/\$(id -u)/$LABEL; mv ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist.disabled ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist; launchctl bootstrap gui/\$(id -u) ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist"
-fi
-
-launchctl bootout "gui/$(id -u)" "$PLIST" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
+# Write and load the launchd agent (and retire the pre-rename one, keeping its plist as *.disabled).
+"$PROJECT/.venv/bin/python" -m kinchat install-agent
 REAL_PY="$("$PROJECT/.venv/bin/python" -c 'import os, sys; print(os.path.realpath(sys.executable))')"
 echo "Installed. Logs: $LOGS/bridge.log"
 echo "Grant Full Disk Access (System Settings > Privacy & Security) to:"

@@ -23,6 +23,11 @@ kinchat/
 Install with `pip install -e '.[graph,ics]'`: `[graph]` (msal) is needed for Microsoft 365 task mail or calendar,
 the default, and `[ics]` expands recurring events in ICS calendars. `scripts/install.sh` installs both. New chat networks: see `docs/writing-a-transport.md`.
 
+**Quickest:** after installing, run `.venv/bin/kinchat setup`. It asks for the assistant's name, your time zone and
+which backends you want, writes `config.yaml` with just those sections, stores the secrets in the Keychain
+(typed, never shown or written to disk), points you at the Full Disk Access setting and installs the launchd
+agent. `kinchat setup --answers answers.yaml` runs the same steps without prompts. The manual steps follow.
+
 1. **Mac account.** Log in as the dedicated `mia` macOS user. Sign in to Messages with the assistant's own Apple ID.
    Turn on FileVault and the firewall ("Block all incoming connections"), and disable sleep.
 2. **Install:** `scripts/install.sh`. It creates the venv, copies `config.yaml` and `family.md` into
