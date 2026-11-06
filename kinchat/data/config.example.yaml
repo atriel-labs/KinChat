@@ -1,0 +1,101 @@
+# Copy to ~/Library/Application Support/kinchat/config.yaml (scripts/install.sh does this).
+# Infrastructure only: contacts, chats and feature toggles live in the dashboard.
+# Secrets are NOT in this file; they come from the Keychain (see README).
+
+# Who the assistant is. The name and aliases are what the family calls it in chat; they're matched as whole
+# words, case-insensitively. tag prefixes the task emails: [MIA-CHAT], [MIA-POST], [MIA-HEARTBEAT].
+assistant:
+  name: Mia
+  aliases: []                    # e.g. [Mimi]
+  owner: the family organizer    # who reviews suggested notes, as the assistant refers to them
+  tag: MIA
+  handles: [mia@example.com]     # the assistant's own iMessage addresses (never treated as a stranger in a group)
+
+# Log routing decisions and draft replies without sending anything. Leave on for 2-3 days, then set false.
+shadow_mode: true
+
+chat:
+  transports: [imessage]   # chat networks to read and post to; "fake" is an in-memory one for trying things out
+
+messages:                  # the imessage transport
+  chat_db: ~/Library/Messages/chat.db
+  poll_seconds: 2
+
+tasks:
+  backend: mailbox         # mailbox: email tasks to an agent ([MIA-CHAT] out, [MIA-POST] back);
+                           # managed_agents: one Claude Managed Agents session per task (see below); none: no tasks
+  mail: graph              # mailbox only: graph (Microsoft 365, see graph: below) or imap (see imap: below)
+  poll_seconds: 30         # imap only; graph uses graph.poll_seconds
+
+# Only for tasks.mail: imap. The app password is in the Keychain (account imap-app-password).
+# Results are read ONLY from sent_folder: the agent sends them as this account, so a genuine result is always
+# in Sent, while anyone can put mail (with any headers) in the Inbox.
+# imap:
+#   host: imap.example.com
+#   port: 993
+#   username: assistant@example.com
+#   address: assistant@example.com
+#   sent_folder: Sent            # Gmail: "[Gmail]/Sent Mail"
+#   smtp_host: smtp.example.com
+#   smtp_port: 587               # 587 = STARTTLS, 465 = TLS
+
+# Only for tasks.backend: managed_agents. Run `kinchat agent setup` once (and after changing this section): it
+# creates or updates the agent and its environment and records their IDs at the end of this file.
+# managed_agents:
+#   model: claude-opus-5-5
+#   budget_usd: 5.00             # spending cap per task session at list prices; the family is told if it's hit
+#   vault_ids: [vlt_example]     # credentials for the MCP servers below
+#   mcp_servers:
+#     - {name: notes, url: "https://mcp.example.com/sse"}
+#   web: false                   # let the agent search and read the web
+#   networking: limited          # or unrestricted (full outbound network for the sandbox)
+#   allowed_hosts: []            # limited networking: hosts the agent may reach, e.g. [www.example.com]
+#   archive_after_hours: 24      # finished tasks' sessions are archived after this
+
+calendar:
+  source: graph            # graph (graph.calendars below), ics (feed URLs in the Keychain account ics-urls) or none;
+                           # ics expands recurring events when installed with the [ics] extra
+  # owner_emails: [you@example.com]   # ics: leave out invites these attendees haven't accepted
+  # days: 14               # defaults to graph.calendar_days
+  # refresh_minutes: 15    # defaults to graph.calendar_refresh_minutes
+
+routing:
+  window_minutes: 12
+  respond_threshold: 0.75
+  not_for_mia_threshold: 0.80
+  quiet_minutes: 60
+  history_messages: 20
+
+replier:
+  model_router: claude-haiku-5-5
+  model_reply: claude-sonnet-5-5
+  router_effort: low
+  reply_effort: low
+  reply_history_messages: 30
+  max_msgs_per_10min: 6
+  timeout_s: 15
+  fallbacks: true          # server-side refusal fallback on the reply model
+
+dashboard:
+  bind: 127.0.0.1
+  port: 8770
+
+quiet_hours:               # used when the "Quiet hours" toggle is on
+  start: 22
+  end: 7
+
+graph:
+  tenant: example.com            # your Entra tenant domain
+  client_id: "00000000-0000-0000-0000-000000000000"   # "Mia Bridge" app registration
+  cert_thumbprint: "HEX_SHA1_THUMBPRINT"
+  mailbox: mia@example.com
+  calendars: [you@example.com, mia@example.com]
+  poll_seconds: 30
+  calendar_refresh_minutes: 15
+  calendar_days: 14
+
+# IANA time zone for quiet hours, timestamps and the calendar. Defaults to the Mac's own time zone.
+# timezone: America/New_York
+
+# Phone numbers written without "+" are read as national numbers in this country: US, CA, GB, AU, NZ or DE.
+default_country: US

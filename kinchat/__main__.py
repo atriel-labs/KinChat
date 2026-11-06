@@ -78,9 +78,10 @@ def cmd_setup(args) -> int:
     def agent(config_path: Path) -> int:
         return cmd_agent(config_mod.load(config_path), "setup", config_path)
 
+    from .keychain import KeychainError
     try:
         return sw.run(p, args.config, install=False if args.no_install else None, agent_setup=agent)
-    except sw.SetupError as e:
+    except (sw.SetupError, KeychainError) as e:
         print(f"setup: {e}", file=sys.stderr)
         return 2
 

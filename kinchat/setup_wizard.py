@@ -27,7 +27,8 @@ TASK_CHOICES = ("mailbox+graph", "mailbox+imap", "managed_agents", "none")
 CALENDAR_CHOICES = ("graph", "ics", "none")
 TRANSPORT_CHOICES = ("imessage", "fake")
 FDA_PANE = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
-EXAMPLE = Path(__file__).resolve().parent.parent / "config.example.yaml"
+# Shipped inside the package so a normal (non-editable) install has it too.
+EXAMPLE = Path(__file__).resolve().parent / "data" / "config.example.yaml"
 
 
 class SetupError(RuntimeError):

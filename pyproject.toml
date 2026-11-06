@@ -21,6 +21,9 @@ kinchat = "kinchat.__main__:main"
 [tool.setuptools]
 packages = ["kinchat", "kinchat.backends"]
 
+[tool.setuptools.package-data]
+kinchat = ["data/config.example.yaml"]  # a copy of ./config.example.yaml (tests/test_packaging.py keeps them equal)
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
