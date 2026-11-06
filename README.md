@@ -4,6 +4,25 @@ A Claude-powered assistant for your family’s iMessage group chat. Answers in s
 > **Status:** being prepared for open source. The assistant is called Mia by default; set `assistant.name`,
 > `aliases`, `tag` and `handles` in `config.yaml` to give it another name (see `config.example.yaml`).
 
+## Try it in 2 minutes
+
+You need Python 3.12+ and an **Anthropic API key** (the simulator makes real Claude API calls). No Mac, Messages
+or mailbox is needed: `kinchat simulate` runs the real router and replier over an in-memory chat with a made-up
+family (Alex, Sam and Jordan) and a temporary database that is deleted when you quit.
+
+```
+git clone https://github.com/atriel-labs/KinChat && cd KinChat
+python3 -m venv .venv && .venv/bin/pip install -e .
+export KINCHAT_ANTHROPIC_API_KEY=sk-ant-...
+.venv/bin/kinchat simulate
+```
+
+Type as a family member; the assistant answers when it's addressed. `/as Sam` switches who is talking, `/dm`
+and `/group` switch chats, and `/why` shows why the last message was or wasn't answered. Task hand-offs are only
+echoed. `kinchat simulate --script lines.txt` runs a file of lines and prints each decision.
+
+## How it works
+
 Puts Mia in the family iMessage group. The bridge reads new messages straight from the Messages
 database (`chat.db`), routes each one (Claude Haiku), replies instantly (Claude Sonnet) by scripting
 Messages, hands real work to Mia in Duet by `[MIA-CHAT]` email, and posts `[MIA-POST]` results back.
@@ -23,13 +42,18 @@ kinchat/
 Install with `pip install -e '.[graph,ics]'`: `[graph]` (msal) is needed for Microsoft 365 task mail or calendar,
 the default, and `[ics]` expands recurring events in ICS calendars. `scripts/install.sh` installs both. New chat networks: see `docs/writing-a-transport.md`.
 
+**Quickest:** after installing, run `.venv/bin/kinchat setup`. It asks for the assistant's name, your time zone and
+which backends you want, writes `config.yaml` with just those sections, stores the secrets in the Keychain
+(typed, never shown or written to disk), points you at the Full Disk Access setting and installs the launchd
+agent. `kinchat setup --answers answers.yaml` runs the same steps without prompts. The manual steps follow.
+
 1. **Mac account.** Log in as the dedicated `mia` macOS user. Sign in to Messages with the assistant's own Apple ID.
    Turn on FileVault and the firewall ("Block all incoming connections"), and disable sleep.
 2. **Install:** `scripts/install.sh`. It creates the venv, copies `config.yaml` and `family.md` into
    `~/Library/Application Support/kinchat/`, loads the launchd agent `io.kinchat.bridge`, and prints
    the Python binary that needs Full Disk Access. The agent restarts repeatedly until steps 3–5 are done.
 3. **Permissions.** In System Settings → Privacy & Security → Full Disk Access, add the Python binary the
-   installer printed (needed to read `chat.db`). Then run `.venv/bin/python -m kinchat check` once from
+   installer printed (needed to read `chat.db`). Then run `.venv/bin/kinchat doctor` once from
    Terminal and allow the "control Messages" Automation prompt.
 4. **Entra "Mia Bridge" app.** Certificate auth, `Mail.ReadWrite` / `Mail.Send` / `Calendars.Read`, scoped
    with Exchange RBAC for Applications, verified with `Test-ServicePrincipalAuthorization`.
@@ -40,7 +64,8 @@ the default, and `[ics]` expands recurring events in ICS calendars. `scripts/ins
    security add-generic-password -s kinchat -a dashboard-password -w '...'
    security add-generic-password -s kinchat -a graph-cert-key-b64 -w "$(base64 -i key.pem | tr -d '\n')"
    ```
-6. **Verify:** `.venv/bin/python -m kinchat check`, then `launchctl kickstart -k gui/$(id -u)/io.kinchat.bridge`.
+6. **Verify:** `.venv/bin/kinchat doctor` (add `--probe-mailbox <another address>` to confirm Graph can't read
+   other mailboxes); every FAIL line says how to fix it. Then `launchctl kickstart -k gui/$(id -u)/io.kinchat.bridge`.
 7. **Dashboard:** open http://127.0.0.1:8770. Add the family members as contacts. From a family member's phone, start a
    group with the others and the assistant's Apple ID and send a message. The group appears under Approved chats as
    **Pending**; set it to **Respond**.
@@ -49,11 +74,47 @@ the default, and `[ics]` expands recurring events in ICS calendars. `scripts/ins
 (`~/Library/Logs/kinchat/bridge.log`, and the dashboard's "Recent routing decisions") but nothing is sent.
 Review 2–3 days, tune thresholds, then set it to `false` and restart.
 
-**Upgrading from mia-bridge:** an existing `~/Library/Application Support/mia-bridge/` directory, Keychain
-items under `ai.atriel.mia-bridge` and `MIA_BRIDGE_*` environment variables are still found, so a live install
-keeps working. `scripts/install.sh` stops the old `ai.atriel.mia-bridge` launchd agent, moves its plist aside to
-`ai.atriel.mia-bridge.plist.disabled` and loads `io.kinchat.bridge`. To roll back in one command:
-`launchctl bootout gui/$(id -u)/io.kinchat.bridge; mv ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist.disabled ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist`
+## Upgrading from mia-bridge
+
+`kinchat migrate` moves a running mia-bridge install to kinchat. It never deletes or moves your old files: the old
+`~/Library/Application Support/mia-bridge/` directory and the `ai.atriel.mia-bridge` Keychain items stay exactly as
+they are, and `kinchat migrate --rollback` puts the old agent back. Do it at a quiet time; the bridge is offline
+for a few seconds.
+
+1. **Update the code** (in the project directory, as the assistant's macOS user):
+   ```
+   git pull
+   .venv/bin/pip install -e '.[graph,ics]'
+   ```
+   Don't run `scripts/install.sh` for this; `migrate` does the agent switch itself.
+2. **Migrate:**
+   ```
+   .venv/bin/kinchat migrate --from mia-bridge
+   ```
+   It stops `ai.atriel.mia-bridge` and renames its plist to `ai.atriel.mia-bridge.plist.disabled`, then copies
+   `config.yaml`, `family.md` and `state.db` into `~/Library/Application Support/kinchat/`. The database is copied
+   with SQLite's backup API and upgraded, so the bridge resumes at the same chat.db message. It copies the
+   Keychain items to the `kinchat` service and adds `assistant.handles` from `graph.mailbox` if missing. Finally it
+   installs and starts `io.kinchat.bridge`, writes `migration.json` in the kinchat directory, and runs
+   `kinchat doctor`.
+3. **If it prints a Full Disk Access warning**, the new launchd agent runs a different Python binary from the old
+   one. Add the binary it names in System Settings > Privacy & Security > Full Disk Access, then
+   `launchctl kickstart -k gui/$(id -u)/io.kinchat.bridge`.
+4. **Check:** `.venv/bin/kinchat doctor` should show no FAIL lines. Then
+   `tail -f ~/Library/Logs/kinchat/bridge.log` while someone sends a message in the family group, and open the
+   dashboard at http://127.0.0.1:8770 (same password as before).
+5. **If anything is wrong, roll back:**
+   ```
+   .venv/bin/kinchat migrate --rollback
+   ```
+   This stops `io.kinchat.bridge` (its plist becomes `io.kinchat.bridge.plist.disabled`), restores the old plist and
+   starts `ai.atriel.mia-bridge` again, on its untouched files. The kinchat directory and Keychain items are left in
+   place but unused. Running `migrate` again later re-copies from the old install, keeping the earlier copy as
+   `*.pre-migrate-<time>`. Without kinchat installed, the same rollback by hand:
+   `launchctl bootout gui/$(id -u)/io.kinchat.bridge; mv ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist.disabled ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist`
+
+Until you migrate, kinchat still reads the old directory, Keychain items and `MIA_BRIDGE_*` variables, so updating
+the code alone doesn't break a live install.
 
 ## Dashboard rules
 

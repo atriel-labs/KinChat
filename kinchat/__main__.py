@@ -1,4 +1,4 @@
-"""kinchat CLI: run the service, check setup, or list chats found in chat.db."""
+"""kinchat CLI: run the service, set it up, check it (doctor), or list chats found in chat.db."""
 from __future__ import annotations
 
 import argparse
@@ -42,45 +42,13 @@ def cmd_chats(cfg: config_mod.Config) -> int:
     return 0
 
 
-def cmd_check(cfg: config_mod.Config) -> int:
-    ok = True
-
-    def step(name, fn):
-        nonlocal ok
-        try:
-            detail = fn()
-            print(f"  ok    {name}" + (f": {detail}" if detail else ""))
-        except Exception as e:
-            ok = False
-            print(f"  FAIL  {name}: {e}")
-
-    import anthropic
-
-    from .backends.imessage import ChatDB, messages_scriptable
-
+def cmd_doctor(cfg: config_mod.Config, probe_mailbox: str | None = None) -> int:
+    from .doctor import Doctor, report
     print(f"shadow_mode={cfg.shadow_mode}, dashboard http://{cfg.dashboard.bind}:{cfg.dashboard.port}")
-    step("family.md", lambda: f"{len(cfg.family_md.read_text())} chars")
-    step("chat.db readable (Full Disk Access)", lambda: f"{len(ChatDB(cfg.messages.chat_db).list_chats())} chats")
-    step("Messages scriptable (Automation)", lambda: f"{messages_scriptable()} chats")
-    step("keychain: anthropic-api-key", lambda: bool(secrets.anthropic_api_key()) and None)
-    step("keychain: dashboard-password", lambda: bool(secrets.dashboard_password()) and None)
-    uses_graph = (cfg.tasks.backend == "mailbox" and cfg.tasks.mail == "graph") or cfg.calendar.source == "graph"
-    if uses_graph:
-        step("keychain: graph-cert-key-b64", lambda: bool(secrets.graph_cert_private_key()) and None)
-    step("anthropic models", lambda: ", ".join(
-        anthropic.Anthropic(api_key=secrets.anthropic_api_key()).models.retrieve(m).id
-        for m in (cfg.replier.model_router, cfg.replier.model_reply)))
-
-    def graph():
-        from .graph import Graph  # needs msal: pip install 'kinchat[graph]'
-        g = cfg.graph
-        client = Graph(g.tenant, g.client_id, g.cert_thumbprint, secrets.graph_cert_private_key(), g.mailbox, cfg.timezone)
-        client._get(f"/users/{g.mailbox}/mailFolders/inbox", {"$select": "totalItemCount"})
-        snap = client.calendar_snapshot(g.calendars, 1)
-        return f"inbox readable; calendars readable ({len(snap.splitlines())} lines)"
-    if uses_graph:
-        step("graph mailbox + calendars", graph)
-    return 0 if ok else 1
+    d = Doctor(cfg, probe_mailbox=probe_mailbox)
+    report(d.run())
+    print("\nFAIL items need fixing before the bridge works." if d.failed else "\nNo failures.")
+    return 1 if d.failed else 0
 
 
 def cmd_agent(cfg: config_mod.Config, action: str | None, config_path: Path) -> int:
@@ -98,18 +66,108 @@ def cmd_agent(cfg: config_mod.Config, action: str | None, config_path: Path) -> 
     return 0
 
 
+def cmd_setup(args) -> int:
+    from . import setup_wizard as sw
+
+    try:
+        p = sw.AnswersPrompter(sw.load_answers(args.answers)) if args.answers else sw.Prompter()
+    except (OSError, sw.SetupError, ValueError) as e:
+        print(f"setup: can't read answers: {e}", file=sys.stderr)
+        return 2
+
+    def agent(config_path: Path) -> int:
+        return cmd_agent(config_mod.load(config_path), "setup", config_path)
+
+    from .keychain import KeychainError
+    try:
+        return sw.run(p, args.config, install=False if args.no_install else None, agent_setup=agent)
+    except (sw.SetupError, KeychainError) as e:
+        print(f"setup: {e}", file=sys.stderr)
+        return 2
+
+
+def cmd_install_agent(args) -> int:
+    from . import launchd
+    for line in launchd.install():
+        print(line)
+        if line.startswith("stopped"):
+            print(f"To roll back: {launchd.ROLLBACK_HINT}")
+    print(f"Grant Full Disk Access to: {launchd.real_python()}")
+    return 0
+
+
+def cmd_simulate(args) -> int:
+    from .simulate import SimulationError, Simulator
+
+    if not args.verbose:
+        logging.getLogger("kinchat").setLevel(logging.CRITICAL)  # keep the chat readable
+    else:
+        logging.basicConfig(level=logging.INFO)
+    # Your own config (if any) supplies the assistant's name and models; nothing else from it is used.
+    base = config_mod.load(args.config) if args.config.exists() else None
+    try:
+        sim = Simulator(base)
+    except SimulationError as e:
+        print(f"simulate: {e}", file=sys.stderr)
+        return 2
+    try:
+        if args.script:
+            sim.script(args.script.read_text().splitlines())
+        else:
+            sim.interactive()
+    finally:
+        sim.close()
+    return 0
+
+
+def cmd_migrate(args) -> int:
+    from . import migrate, paths
+
+    try:
+        if args.rollback:
+            migrate.rollback()
+            return 0
+        if args.from_ != "mia-bridge":
+            print("usage: kinchat migrate --from mia-bridge [--force] | kinchat migrate --rollback", file=sys.stderr)
+            return 2
+        migrate.migrate(force=args.force)
+    except migrate.MigrateError as e:
+        print(f"migrate: {e}", file=sys.stderr)
+        return 1
+    print("\nRunning kinchat doctor:")
+    cfg_path = paths.app_dir() / "config.yaml"
+    return cmd_doctor(config_mod.load(cfg_path)) if cfg_path.exists() else 0
+
+
+COMMANDS = ("run", "check", "doctor", "chats", "agent", "setup", "install-agent", "simulate", "migrate")
+NEEDS_NO_CONFIG = ("setup", "install-agent", "simulate", "migrate")
+
+
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="kinchat")
-    p.add_argument("command", nargs="?", default="run", choices=["run", "check", "chats", "agent"])
+    p = argparse.ArgumentParser(prog="kinchat", description="Run the bridge or set it up.")
+    p.add_argument("command", nargs="?", default="run", choices=COMMANDS,
+                   help="run (default), setup, doctor (alias: check), simulate, migrate, chats, agent setup, install-agent")
     p.add_argument("action", nargs="?", help="for `agent`: setup")
     p.add_argument("--config", type=Path, default=APP_DIR / "config.yaml")
+    p.add_argument("--answers", type=Path, help="setup: take answers from this YAML file instead of asking")
+    p.add_argument("--no-install", action="store_true", help="setup: don't install the launchd agent")
+    p.add_argument("--from", dest="from_", help="migrate: the install to migrate from (mia-bridge)")
+    p.add_argument("--rollback", action="store_true", help="migrate: switch back to the mia-bridge agent")
+    p.add_argument("--force", action="store_true", help="migrate: copy even if no mia-bridge agent is found")
+    p.add_argument("--script", type=Path, help="simulate: read chat lines from this file instead of the keyboard")
+    p.add_argument("--probe-mailbox", help="doctor: another address in the tenant that Graph must NOT be able to read")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
+    if args.command in NEEDS_NO_CONFIG:
+        return {"setup": cmd_setup, "install-agent": cmd_install_agent, "simulate": cmd_simulate,
+                "migrate": cmd_migrate}[args.command](args)
     _setup_logging(args.verbose)
     cfg = config_mod.load(args.config)
     if args.command == "agent":
         return cmd_agent(cfg, args.action, args.config)
-    return {"run": cmd_run, "check": cmd_check, "chats": cmd_chats}[args.command](cfg)
+    if args.command in ("doctor", "check"):
+        return cmd_doctor(cfg, args.probe_mailbox)
+    return {"run": cmd_run, "chats": cmd_chats}[args.command](cfg)
 
 
 if __name__ == "__main__":
