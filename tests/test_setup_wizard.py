@@ -72,7 +72,7 @@ def test_secrets_reach_keychain_and_nowhere_else(tmp_path, fake):
     cfg_path, lines = run(tmp_path, answers("mailbox+imap", "ics"), install=True)
     kc = fake.keychain()
     assert kc["kinchat/anthropic-api-key"] == SECRETS["anthropic-api-key"]
-    assert kc["kinchat/ics-urls"] == SECRETS["ics-urls"].replace(" ", "\n")  # one URL per line
+    assert kc["kinchat/ics-urls"] == SECRETS["ics-urls"]  # one line, URLs separated by spaces
     adds = [c for c in fake.calls("security") if c[1] == "add-generic-password"]
     assert adds and all(c[2:6] == ["-U", "-s", "kinchat", "-a"] for c in adds)
     output = "\n".join(lines)
@@ -145,3 +145,20 @@ def test_cli_answers_file(tmp_path, fake, monkeypatch):
     assert main(["setup", "--answers", str(af), "--config", str(cfg), "--no-install"]) == 0
     assert config_mod.load(cfg).assistant.name == "Robin"
     assert main(["setup", "--answers", str(tmp_path / "missing.yaml"), "--config", str(cfg)]) == 2
+
+
+def test_no_secret_ever_on_a_command_line(tmp_path, fake, monkeypatch):
+    """Every argv `security` and `launchctl` actually received (logged by the fakes), plus every argv given to
+    subprocess, must be free of secret values: ps would show them to every process on the Mac."""
+    import subprocess
+    seen = []
+    real_run = subprocess.run
+    monkeypatch.setattr(subprocess, "run", lambda cmd, *a, **k: seen.append(list(cmd)) or real_run(cmd, *a, **k))
+    run(tmp_path, answers("mailbox+imap", "ics"), install=True)
+    argvs = [c[1:] for c in fake.calls()] + seen
+    assert any(a[:2] == ["add-generic-password", "-U"] and a[-1] == "-w" for a in argvs)  # values were prompted
+    for argv in argvs:
+        joined = " ".join(argv)
+        for value in SECRETS.values():
+            for piece in value.split():
+                assert piece not in joined

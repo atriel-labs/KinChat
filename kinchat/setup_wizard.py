@@ -272,10 +272,8 @@ def collect_secret(account: str, p: Prompter) -> str:
             return p.secret(account, "")
         pem = Path(p.ask("graph_cert_key_path", "Path to the certificate's private key (.pem)")).expanduser()
         return base64.b64encode(pem.read_bytes()).decode()
-    value = p.secret(account, SECRET_QUESTIONS[account])
-    if account == "ics-urls":
-        value = "\n".join(value.split())
-    return value
+    value = p.secret(account, SECRET_QUESTIONS[account]).strip()
+    return " ".join(value.split()) if account == "ics-urls" else value
 
 
 # --- the whole flow ------------------------------------------------------------------
@@ -294,7 +292,7 @@ def run(p: Prompter, config_path: Path, home: Path | None = None, install: bool 
         if keychain.read(account, keychain.SERVICE, run=security_run) is not None and not p.confirm(
                 f"replace_{account}", f"Keychain already has {account}. Replace it?", False):
             continue
-        keychain.store(account, collect_secret(account, p), run=security_run)
+        keychain.store(account, collect_secret(account, p))
         p.out(f"Stored {account} in the Keychain.")
 
     if plan["tasks"]["backend"] == "managed_agents" and p.confirm(

@@ -26,7 +26,16 @@ if name == "security":
             print(items[key]); sys.exit(0)
         print("security: The specified item could not be found in the keychain.", file=sys.stderr); sys.exit(44)
     if args[0] == "add-generic-password":
-        items[key] = opt("-w"); kc.write_text(json.dumps(items)); sys.exit(0)
+        if args[-1] == "-w":  # prompted, like the real one: read twice from the terminal
+            sys.stdout.write("password data for new item: "); sys.stdout.flush()
+            first = sys.stdin.readline().rstrip("\n")
+            sys.stdout.write("\nretype password for new item: "); sys.stdout.flush()
+            if sys.stdin.readline().rstrip("\n") != first:
+                print("passwords don't match", file=sys.stderr); sys.exit(1)
+            value = first
+        else:
+            value = opt("-w")
+        items[key] = value; kc.write_text(json.dumps(items)); sys.exit(0)
     sys.exit(1)
 if name == "launchctl":
     loaded = state / "loaded.json"

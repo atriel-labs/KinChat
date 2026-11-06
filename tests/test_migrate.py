@@ -157,3 +157,15 @@ def test_cli(home, fake, monkeypatch, capsys):
     assert cli.main(["migrate"]) == 2
     assert cli.main(["migrate", "--from", "mia-bridge"]) == 1
     assert "migrate:" in capsys.readouterr().err
+
+
+def test_migrate_never_puts_secrets_on_a_command_line(home, fake):
+    make_old_install(home, fake)
+    fake.set_secret("ai.atriel.mia-bridge", "ics-urls", "https://cal.example.com/a.ics\nhttps://cal.example.com/b.ics")
+    migrate.migrate(home, python="/opt/old/python3.12", out=lambda *a: None)
+    kc = fake.keychain()
+    assert kc["kinchat/anthropic-api-key"] == "sk-old-key"
+    assert kc["kinchat/ics-urls"] == "https://cal.example.com/a.ics https://cal.example.com/b.ics"
+    for call in fake.calls():
+        joined = " ".join(call)
+        assert "sk-old-key" not in joined and "old-pw" not in joined and "cal.example.com" not in joined

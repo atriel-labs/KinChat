@@ -154,7 +154,7 @@ def migrate(home: Path | None = None, force: bool = False, python: str | None = 
         if value is None:
             continue
         if keychain.read(account, SERVICE, run=run) != value:
-            keychain.store(account, value, SERVICE, run=run)
+            keychain.store(account, " ".join(value.split()) if account == "ics-urls" else value, SERVICE)
         entry["keychain_copied"].append(account)
     if entry["keychain_copied"]:
         out(f"copied Keychain items to service {SERVICE}: {', '.join(entry['keychain_copied'])} "
