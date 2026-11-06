@@ -6,7 +6,8 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
-import msal
+
+from .backends.calendar import MAX_EVENT_FIELD, clean, format_event, section  # noqa: F401
 
 log = logging.getLogger(__name__)
 
@@ -16,6 +17,10 @@ GRAPH = "https://graph.microsoft.com/v1.0"
 class Graph:
     def __init__(self, tenant: str, client_id: str, cert_thumbprint: str, private_key_pem: str,
                  mailbox: str, timezone: str):
+        try:
+            import msal  # optional: pip install 'kinchat[graph]'
+        except ImportError as e:
+            raise RuntimeError("Graph needs msal: pip install 'kinchat[graph]'") from e
         self.mailbox = mailbox
         self._tz = timezone
         self._app = msal.ConfidentialClientApplication(
@@ -103,11 +108,8 @@ class Graph:
                         continue
                     lines.append(_format_event(ev))
                 url, params = data.get("@odata.nextLink"), None
-            sections.append(f"{user}:\n" + ("\n".join(lines) if lines else "  (nothing scheduled)"))
+            sections.append(section(user, lines))
         return "\n\n".join(sections)
-
-
-MAX_EVENT_FIELD = 80
 
 
 def _owned_event(ev: dict) -> bool:
@@ -117,18 +119,11 @@ def _owned_event(ev: dict) -> bool:
     return bool(ev.get("isOrganizer")) or response in ("organizer", "accepted", "tentativelyAccepted")
 
 
-def _clean(text: str | None) -> str:
-    text = " ".join((text or "").replace("<", "").replace(">", "").split())
-    return text if len(text) <= MAX_EVENT_FIELD else text[: MAX_EVENT_FIELD - 1].rstrip() + "…"
+_clean = clean  # kept for callers of the old private name
 
 
 def _format_event(ev: dict) -> str:
     s = datetime.fromisoformat(ev["start"]["dateTime"][:19])
     e = datetime.fromisoformat(ev["end"]["dateTime"][:19])
-    if ev.get("isAllDay"):
-        when = s.strftime("%a %b %d") + " (all day)"
-    else:
-        when = f"{s.strftime('%a %b %d %H:%M')}-{e.strftime('%H:%M')}"
-    loc = _clean((ev.get("location") or {}).get("displayName"))
-    busy = ev.get("showAs", "busy")
-    return f"  {when}: {_clean(ev.get('subject')) or '(no title)'}" + (f" @ {loc}" if loc else "") + f" [{busy}]"
+    return format_event(s, e, bool(ev.get("isAllDay")), ev.get("subject"), (ev.get("location") or {}).get("displayName"),
+                        ev.get("showAs", "busy"))

@@ -24,10 +24,10 @@ def make(cfg, store, settings, result=None, members=("+18005550100", SAM)):
 
 def test_new_group_shows_pending_and_is_dropped(cfg, store, settings):  # acceptance 9 + dashboard
     r, fc = make(cfg, store, settings, cls())
-    d = r.route(incoming("Mia, hi", chat="iMessage;+;chatNEW"))
+    d = r.route(incoming("Mia, hi", chat="imessage:iMessage;+;chatNEW"))
     assert not d.respond and fc.calls == 0
-    assert settings.get_chat("iMessage;+;chatNEW").mode == "pending"
-    assert store.recent_messages("iMessage;+;chatNEW", 10) == []
+    assert settings.get_chat("imessage:iMessage;+;chatNEW").mode == "pending"
+    assert store.recent_messages("imessage:iMessage;+;chatNEW", 10) == []
     assert any(a["new"] == "pending" for a in settings.audit_log())
 
 
@@ -95,7 +95,7 @@ def test_one_on_one_rules(cfg, store, settings):
     assert d.respond and d.reason == "direct message"
     contact = settings.contact_for_handle(SAM)
     settings.update_contact(contact.id, "Sam", [SAM], one_on_one=False, can_assign=True)
-    assert not r.route(incoming("hey", handle=SAM, chat=f"iMessage;-;{SAM}")).respond
+    assert not r.route(incoming("hey", handle=SAM, chat=f"imessage:iMessage;-;{SAM}")).respond
 
 
 # --- routing ------------------------------------------------------------------

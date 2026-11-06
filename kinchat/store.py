@@ -125,8 +125,32 @@ def _v1(db: sqlite3.Connection) -> None:
             db.execute(f"ALTER TABLE decisions ADD COLUMN {col} {kind}")
 
 
+# Every table that stores a chat ID. Chat IDs are namespaced "<transport>:<native id>" from v2 on.
+CHAT_ID_COLUMNS = (("chats", "chat_guid"), ("messages", "chat_guid"), ("window", "chat_guid"),
+                   ("tasks", "chat_guid"), ("outbox", "chat_guid"), ("notes", "chat_guid"))
+
+
+def _v2(db: sqlite3.Connection) -> None:
+    """Namespace chat IDs: everything stored so far came from iMessage, so "iMessage;+;x" becomes
+    "imessage:iMessage;+;x". Native iMessage GUIDs never contain ":", so already-prefixed rows are left alone."""
+    for table, col in CHAT_ID_COLUMNS:
+        db.execute(f"UPDATE {table} SET {col} = 'imessage:' || {col} WHERE {col} IS NOT NULL AND instr({col}, ':') = 0")
+
+
+def _v3(db: sqlite3.Connection) -> None:
+    """Tasks remember which backend owns them and, for session-based backends, the session ID."""
+    db.execute("ALTER TABLE tasks ADD COLUMN backend TEXT NOT NULL DEFAULT 'mailbox'")
+    db.execute("ALTER TABLE tasks ADD COLUMN session_id TEXT")
+
+
+def _v4(db: sqlite3.Connection) -> None:
+    """Managed Agents session events already handled, so each is acted on once."""
+    db.execute("CREATE TABLE IF NOT EXISTS agent_events (event_id TEXT PRIMARY KEY, session_id TEXT NOT NULL,"
+               " ts REAL NOT NULL)")
+
+
 # MIGRATIONS[i] takes a database from user_version i to i + 1. Append only.
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1]
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_v1, _v2, _v3, _v4]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -185,6 +209,8 @@ class Task:
     created_ts: float
     updated_ts: float
     email_msg_id: str | None
+    backend: str = "mailbox"
+    session_id: str | None = None
 
 
 class Store:
@@ -280,12 +306,12 @@ class Store:
             return f"T-{n:04d}"
 
     def create_task(self, task_id: str, chat_guid: str, summary: str, details: str | None,
-                    requested_by: str | None) -> Task:
+                    requested_by: str | None, backend: str = "mailbox", session_id: str | None = None) -> Task:
         now = time.time()
         self._q(
-            "INSERT INTO tasks (task_id, chat_guid, summary, details, status, requested_by, created_ts, updated_ts)"
-            " VALUES (?, ?, ?, ?, 'open', ?, ?, ?)",
-            (task_id, chat_guid, summary, details, requested_by, now, now),
+            "INSERT INTO tasks (task_id, chat_guid, summary, details, status, requested_by, created_ts, updated_ts,"
+            " backend, session_id) VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?, ?)",
+            (task_id, chat_guid, summary, details, requested_by, now, now, backend, session_id),
         )
         return self.get_task(task_id)
 
@@ -305,7 +331,8 @@ class Store:
     def relevant_tasks(self, chat_guid: str, finished_within_days: int = 3) -> list[Task]:
         cutoff = time.time() - finished_within_days * 86400
         rows = self._q(
-            "SELECT * FROM tasks WHERE chat_guid = ? AND (status IN ('open', 'needs_input') OR updated_ts >= ?)"
+            "SELECT * FROM tasks WHERE chat_guid = ? AND (status IN ('open', 'needs_input', 'paused_budget')"
+            " OR updated_ts >= ?)"
             " ORDER BY created_ts",
             (chat_guid, cutoff),
         ).fetchall()

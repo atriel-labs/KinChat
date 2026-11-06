@@ -5,20 +5,21 @@ description = "A Claude-powered assistant for your family's iMessage group chat"
 requires-python = ">=3.12"
 dependencies = [
     "anthropic>=2.4",
-    "msal>=1.31",
     "httpx>=0.27",
     "flask>=3.0",
     "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
+graph = ["msal>=1.31"]  # Microsoft 365 task mail and calendar
+ics = ["icalendar>=7.3,<8", "recurring-ical-events>=3.8,<4"]  # expand recurring events in ICS calendars
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]
 kinchat = "kinchat.__main__:main"
 
 [tool.setuptools]
-packages = ["kinchat"]
+packages = ["kinchat", "kinchat.backends"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

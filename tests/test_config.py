@@ -33,7 +33,8 @@ def test_config_defaults_to_system_zone_and_us(tmp_path, monkeypatch):
     assert cfg.timezone == "America/New_York" and cfg.default_country == "GB"
 
 
-@pytest.mark.parametrize("yaml", ["default_country: FR\n", "timezone: Mars/Olympus\n"])
+@pytest.mark.parametrize("yaml", ["default_country: FR\n", "timezone: Mars/Olympus\n", "tasks:\n  backend: pigeon\n",
+                                  "tasks:\n  mail: fax\n", "chat:\n  transports: [carrier]\n"])
 def test_config_rejects_bad_locale(tmp_path, yaml):
     p = tmp_path / "config.yaml"
     p.write_text(yaml)
@@ -47,3 +48,8 @@ def test_quiet_hours_label_follows_config():
     assert default["quiet_hours"] == ("Quiet hours (10 PM–7 AM)", "Replies are held until 7 AM unless marked urgent")
     custom = dict((k, (label, off)) for k, label, _, off in feature_rows("Mia", 21, 6))
     assert custom["quiet_hours"] == ("Quiet hours (9 PM–6 AM)", "Replies are held until 6 AM unless marked urgent")
+
+
+def test_example_config_loads():
+    cfg = config_mod.load("config.example.yaml")
+    assert (cfg.tasks.backend, cfg.tasks.mail, cfg.chat.transports) == ("mailbox", "graph", ["imessage"])

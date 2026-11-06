@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-      - run: python -m pip install -e ".[dev]"
+      - run: python -m pip install -e ".[dev,graph,ics]"
       - run: ruff check .
       - run: pytest -q
 

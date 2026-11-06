@@ -2,8 +2,10 @@ import json
 
 from conftest import CHAT
 
+from kinchat.backends.mail_graph import GraphMail
+from kinchat.backends.mailbox import MailboxBackend
 from kinchat.llm import TaskRequest
-from kinchat.tasks import ResultPoller, TaskDesk, accept_result, parse_result_body
+from kinchat.tasks import NoTaskBackend, accept_result, parse_result_body
 
 MIA = "mia@example.com"
 
@@ -18,18 +20,29 @@ def post_msg(task_id="T-0001", sender=MIA, internal=True, body="Booked for 7pm!\
 class FakeGraph:
     mailbox = MIA
 
-    def __init__(self, msgs):
+    def __init__(self, msgs, sent=None):
         self.msgs = {m["id"]: m for m in msgs}
+        self.sent = sent if sent is not None else []
+        self.links = []
 
     def inbox_delta(self, link, since):
+        self.links.append(link)
         return [{"id": k, "subject": m["subject"]} for k, m in self.msgs.items()], "delta-2"
 
     def get_message_for_post(self, mid):
         return self.msgs[mid]
 
+    def send_to_self(self, subject, body):
+        self.sent.append((subject, body))
+        return "<id@x>"
+
 
 def desk(cfg, store, sent):
-    return TaskDesk(cfg, store, lambda subj, body: sent.append((subj, body)) or "<id@x>")
+    return MailboxBackend(cfg, store, GraphMail(FakeGraph([], sent), store), lambda chat, text: None)
+
+
+def poller(cfg, store, msgs, post):
+    return MailboxBackend(cfg, store, GraphMail(FakeGraph(msgs), store), post)
 
 
 def req(summary="Book dinner Sat 7pm for 4", update=None):
@@ -64,7 +77,7 @@ def test_update_cannot_cross_chats(cfg, store):
     sent = []
     d = desk(cfg, store, sent)
     d.hand_off(req(), CHAT, "Alex")
-    t = d.hand_off(req("change it", update="T-0001"), "iMessage;-;+18005550101", "Sam")
+    t = d.hand_off(req("change it", update="T-0001"), "imessage:iMessage;-;+18005550101", "Sam")
     assert t.task_id == "T-0002"
 
 
@@ -94,17 +107,44 @@ def test_acceptance_rules(cfg, store):  # acceptance 6
 def test_result_posted_once_to_task_chat(cfg, store):  # acceptance 5
     store.create_task("T-0001", CHAT, "s", None, "Alex")
     posts = []
-    p = ResultPoller(cfg, store, FakeGraph([post_msg()]), lambda chat, text: posts.append((chat, text)))
-    assert p.poll_once() == 1
-    assert p.poll_once() == 0
+    p = poller(cfg, store, [post_msg()], lambda chat, text: posts.append((chat, text)))
+    assert p.poll() == 1
+    assert p.poll() == 0
     assert posts == [(CHAT, "Booked for 7pm!")]
     assert store.get_task("T-0001").status == "done"
-    assert p.last_ok is not None
+    assert p.last_ok is not None and store.kv_get("inbox_delta_link") == "delta-2"
+    assert p.mail.graph.links == [None, "delta-2"]  # the delta link carries over between polls
 
 
 def test_needs_input_keeps_task_open(cfg, store):
     store.create_task("T-0001", CHAT, "s", None, "Alex")
     posts = []
-    ResultPoller(cfg, store, FakeGraph([post_msg(body="7 or 7:30?\nSTATUS: needs_input")]),
-                 lambda c, t: posts.append(t)).poll_once()
+    poller(cfg, store, [post_msg(body="7 or 7:30?\nSTATUS: needs_input")], lambda c, t: posts.append(t)).poll()
     assert store.task_is_open("T-0001") and posts == ["7 or 7:30?"]
+
+
+def test_forged_results_rejected_through_graph_mail(cfg, store):
+    store.create_task("T-0001", CHAT, "s", None, "Alex")
+    posts = []
+    msgs = [post_msg(sender="evil@example.com", mid="a"), post_msg(internal=False, mid="b"),
+            post_msg(task_id="T-0099", mid="c")]
+    assert poller(cfg, store, msgs, lambda c, t: posts.append(t)).poll() == 0 and posts == []
+
+
+def test_shadow_mode_marks_results_without_posting(cfg, store):
+    cfg.shadow_mode = True
+    store.create_task("T-0001", CHAT, "s", None, "Alex")
+    posts = []
+    assert poller(cfg, store, [post_msg()], lambda c, t: posts.append(t)).poll() == 0
+    assert posts == [] and store.already_posted("g1")
+
+
+def test_handoff_records_backend(cfg, store):
+    t = desk(cfg, store, []).hand_off(req(), CHAT, "Alex")
+    assert (t.backend, t.session_id) == ("mailbox", None)
+
+
+def test_none_backend_takes_no_tasks(store):
+    b = NoTaskBackend()
+    assert not b.accepts_tasks and b.hand_off(req(), CHAT, "Alex") is None and b.poll() == 0
+    assert store.get_task("T-0001") is None

@@ -78,6 +78,11 @@ class HealthBoard:
         h = self._items[name] = Health(name, label, self._clock)
         return h
 
+    def register(self, health: Health) -> Health:
+        """Show a record a component created itself (e.g. a transport's)."""
+        self._items[health.status.name] = health
+        return health
+
     def __getitem__(self, name: str) -> Health:
         return self._items[name]
 

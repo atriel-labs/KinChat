@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -86,14 +87,18 @@ def norm_handle(h: str, country: str = "US") -> str:
     return digits
 
 
-def is_group_guid(chat_guid: str) -> bool:
-    return ";+;" in chat_guid
+def imessage_is_group(chat_id: str) -> bool:
+    """The is_group rule when no transport registry is given: only namespaced iMessage group IDs are groups."""
+    prefix, _, native = chat_id.partition(":")
+    return prefix == "imessage" and ";+;" in native
 
 
 class Settings:
-    def __init__(self, store: Store, default_country: str = "US"):
+    def __init__(self, store: Store, default_country: str = "US",
+                 is_group: Callable[[str], bool] = imessage_is_group):
         self._s = store
         self.country = default_country
+        self._is_group = is_group  # normally TransportRegistry.is_group
         for key, _, default, _ in FEATURES:
             store._q("INSERT OR IGNORE INTO features (key, enabled) VALUES (?, ?)", (key, int(default)))
 
@@ -208,7 +213,7 @@ class Settings:
         """Final check before anything is posted to a chat."""
         if not self.feature("mia_enabled"):
             return False
-        if is_group_guid(chat_guid):
+        if self._is_group(chat_guid):
             chat = self.get_chat(chat_guid)
             return bool(chat and chat.mode == "respond")
         return self.feature("one_on_one")

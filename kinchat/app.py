@@ -1,4 +1,4 @@
-"""Wire the bridge together: chat.db watcher, router/replier, outbound, result poller, calendar, heartbeat, dashboard.
+"""Wire the bridge together: chat transports, router/replier, outbound, result poller, calendar, heartbeat, dashboard.
 
 Each subsystem starts on its own. A missing secret, missing Graph config or missing macOS permission
 switches that part off and shows up in the dashboard's Health section; it never stops the bridge
@@ -13,16 +13,17 @@ import time
 from datetime import datetime
 
 from . import secrets
+from .backends.base import ChatTransport, Incoming, TransportRegistry
+from .backends.calendar import CalendarSource, NoCalendar
 from .config import Config
 from .dashboard import create_app
 from .health import HealthBoard
 from .llm import LLM, Classification, Reply
-from .messages import ChatDB, Incoming, messages_scriptable, send_text
 from .outbound import Outbound
 from .router import Decision, Router
 from .settings import Notes, Settings
 from .store import Message, Store, Task
-from .tasks import ResultPoller, TaskDesk
+from .tasks import NoTaskBackend, TaskBackend
 
 log = logging.getLogger(__name__)
 
@@ -33,35 +34,47 @@ class Bridge:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.store = Store(cfg.db_path)
-        self.settings = Settings(self.store, cfg.default_country)
+        self.transports = TransportRegistry(self._make_transports())
+        self.settings = Settings(self.store, cfg.default_country, self.transports.is_group)
         self.notes = Notes(self.store, self.settings, cfg.family_md)
         self.calendar = ""
         self.last_chatdb_read: float | None = None
 
         self.health = HealthBoard()
-        self.h_chatdb = self.health.add("chatdb", "chat.db watcher")
-        self.h_messages = self.health.add("messages", "Messages sending (Automation)")
+        for t in self.transports:
+            self.health.register(t.health)
+            if getattr(t, "send_health", None) is not None:
+                self.health.register(t.send_health)
         self.h_llm = self.health.add("llm", "Claude API")
-        self.h_mail = self.health.add("mail", "Task mail (Graph)")
-        self.h_calendar = self.health.add("calendar", "Calendar (Graph)")
         self.h_dashboard = self.health.add("dashboard", "Dashboard password")
 
-        self.chatdb = ChatDB(cfg.messages.chat_db)  # opened lazily; the watcher reports whether it can be read
-        self.h_chatdb.degraded("not read yet")
-        self.h_messages.degraded("not checked yet")
         self.llm = self._start_llm()
         self.graph = self._start_graph()
         self.dashboard_password = self._dashboard_password()
 
         rp = cfg.replier
-        self.outbound = Outbound(self.store, self.settings, self._send_text, rp.max_msgs_per_10min,
+        # Outbound sends through the registry, which routes each chat ID to its transport by prefix.
+        self.outbound = Outbound(self.store, self.settings, self.transports.send, rp.max_msgs_per_10min,
                                  cfg.routing.window_minutes, cfg.shadow_mode, cfg.tz,
                                  cfg.quiet_hours.start, cfg.quiet_hours.end)
-        self.router = Router(cfg, self.store, self.settings, self._classify, self.chatdb.participants)
-        self.desk = TaskDesk(cfg, self.store, self._send_mail if self.graph else None)
-        self.poller = ResultPoller(cfg, self.store, self.graph, self.outbound.post)
+        self.router = Router(cfg, self.store, self.settings, self._classify, self.transports.participants)
+        self.tasks: TaskBackend = self._make_task_backend()
+        self.health.register(self.tasks.health)
+        self.calendar_source: CalendarSource = self._make_calendar()
+        self.health.register(self.calendar_source.health)
 
     # --- startup ----------------------------------------------------------
+
+    def _make_transports(self) -> list[ChatTransport]:
+        out: list[ChatTransport] = []
+        for name in self.cfg.chat.transports:
+            if name == "imessage":
+                from .backends.imessage import IMessageTransport
+                out.append(IMessageTransport(self.cfg.messages.chat_db, self.store))
+            elif name == "fake":
+                from .backends.fake import FakeTransport
+                out.append(FakeTransport())
+        return out
 
     def _start_llm(self) -> LLM | None:
         rp, a = self.cfg.replier, self.cfg.assistant
@@ -76,24 +89,23 @@ class Bridge:
 
     def _start_graph(self):
         g = self.cfg.graph
+        self.graph_error: str | None = None
+        t, c = self.cfg.tasks, self.cfg.calendar
+        if not ((t.backend == "mailbox" and t.mail == "graph") or c.source == "graph"):
+            self.graph_error = "graph not selected"
+            return None  # nothing uses Graph: don't build it (or import msal)
         missing = [k for k in ("tenant", "client_id", "cert_thumbprint", "mailbox") if not getattr(g, k)]
         if missing:
-            for h in (self.h_mail, self.h_calendar):
-                h.failed(f"graph not configured (missing {', '.join(missing)})")
+            self.graph_error = f"graph not configured (missing {', '.join(missing)})"
             return None
         try:
             from .graph import Graph  # imports msal; only needed when Graph is configured
             graph = Graph(g.tenant, g.client_id, g.cert_thumbprint, secrets.graph_cert_private_key(),
                           g.mailbox, self.cfg.timezone)
         except Exception as e:
-            for h in (self.h_mail, self.h_calendar):
-                h.failed(e)
+            self.graph_error = f"{type(e).__name__}: {e}"
+            log.error("Graph unavailable: %s", self.graph_error)
             return None
-        self.h_mail.degraded("inbox not polled yet")
-        if g.calendars:
-            self.h_calendar.degraded("not refreshed yet")
-        else:
-            self.h_calendar.failed("no calendars configured")
         return graph
 
     def _dashboard_password(self) -> str | None:
@@ -108,15 +120,11 @@ class Bridge:
         self.h_dashboard.ok()
         return pw
 
-    def _check_messages(self) -> None:
-        """Ask Messages for its chat count once, so macOS shows the Automation prompt at startup."""
-        try:
-            n = messages_scriptable()
-        except Exception as e:
-            self.h_messages.failed(e)
-            return
-        self.h_messages.ok()
-        log.info("Messages is scriptable (%d chats)", n)
+    def _check_transports(self) -> None:
+        for t in self.transports:
+            check = getattr(t, "check_scriptable", None)
+            if check:
+                check()
 
     # --- subsystem calls that report health -------------------------------
 
@@ -133,22 +141,82 @@ class Bridge:
             self.h_llm.ok()
         return result
 
-    def _send_text(self, chat_guid: str, text: str) -> None:
-        try:
-            send_text(chat_guid, text)
-        except Exception as e:
-            self.h_messages.degraded(e)
-            raise
-        self.h_messages.ok()
+    def _make_task_backend(self) -> TaskBackend:
+        t = self.cfg.tasks
+        if t.backend == "none":
+            return NoTaskBackend()
+        if t.backend == "managed_agents":
+            from .backends.managed_agents import ManagedAgentsBackend
+            client, error = None, None
+            try:
+                import anthropic
+                client = anthropic.Anthropic(api_key=secrets.anthropic_api_key(), max_retries=2)
+            except Exception as e:
+                error = e
+            backend = ManagedAgentsBackend(self.cfg, self.store, client, self.outbound.post)
+            if error is not None:
+                backend.health.failed(error)
+            return backend
+        from .backends.mailbox import MailboxBackend
+        mail, error = None, None
+        if t.mail == "imap":
+            from .backends.mail_imap import ImapMail
+            missing = [k for k in ("host", "username") if not getattr(self.cfg.imap, k)]
+            if missing:
+                error = f"imap not configured (missing {', '.join(missing)})"
+            else:
+                try:
+                    mail = ImapMail(self.cfg.imap, secrets.imap_app_password(), self.store)
+                except Exception as e:
+                    error = f"{type(e).__name__}: {e}"
+        elif self.graph is not None:
+            from .backends.mail_graph import GraphMail
+            mail = GraphMail(self.graph, self.store)
+        else:
+            error = self.graph_error
+        backend = MailboxBackend(self.cfg, self.store, mail, self.outbound.post)
+        if mail is None:
+            backend.health.failed(error or "no mail transport")
+        else:
+            backend.health.degraded("inbox not polled yet")
+        return backend
 
-    def _send_mail(self, subject: str, body: str) -> str | None:
-        try:
-            msg_id = self.graph.send_to_self(subject, body)
-        except Exception as e:
-            self.h_mail.degraded(e)
-            raise
-        self.h_mail.ok()
-        return msg_id
+    @property
+    def h_mail(self):
+        return self.tasks.health
+
+    @property
+    def h_calendar(self):
+        return self.calendar_source.health
+
+    def _make_calendar(self) -> CalendarSource:
+        c, g = self.cfg.calendar, self.cfg.graph
+        days = c.days or g.calendar_days
+        if c.source == "none":
+            return NoCalendar()
+        if c.source == "ics":
+            from .backends.cal_ics import IcsCalendar
+            try:
+                urls = secrets.ics_urls()
+            except Exception as e:
+                cal = IcsCalendar([], c.owner_emails, self.cfg.tz, days)
+                cal.health.failed(e)
+                return cal
+            cal = IcsCalendar(urls, c.owner_emails, self.cfg.tz, days)
+            if urls:
+                cal.health.degraded("not refreshed yet")
+            else:
+                cal.health.failed("ics-urls is empty")
+            return cal
+        from .backends.cal_graph import GraphCalendar
+        cal = GraphCalendar(self.graph, g.calendars, days)
+        if self.graph is None:
+            cal.health.failed(self.graph_error or "graph not configured")
+        elif not g.calendars:
+            cal.health.failed("no calendars configured")
+        else:
+            cal.health.degraded("not refreshed yet")
+        return cal
 
     # --- incoming messages -------------------------------------------------
 
@@ -171,7 +239,8 @@ class Bridge:
             family_md = cfg.family_md.read_text()
         except OSError:
             family_md = "(no family notes)"
-        can_hand_off = self.settings.feature("task_handoff") and d.contact.can_assign
+        can_hand_off = (self.settings.feature("task_handoff") and d.contact.can_assign
+                        and getattr(self.tasks, "accepts_tasks", True))
         reply: Reply | None = self._llm_result(self.llm.reply(
             self.store.recent_messages(chat, cfg.replier.reply_history_messages),
             self.store.relevant_tasks(chat), self.calendar, family_md, d.classification,
@@ -186,38 +255,32 @@ class Bridge:
             self.outbound.post(chat, HANDOFF_ACK, urgent=d.urgent)
         log.info("handled %s in %.1fs%s", inc.guid, time.time() - inc.ts, " (shadow)" if cfg.shadow_mode else "")
         if task:
-            self.desk.hand_off(task, chat, d.contact.name)
+            self.tasks.hand_off(task, chat, d.contact.name)
         if reply.notes and self.settings.feature("note_suggestions"):
             added = sum(self.notes.suggest(n, chat, d.contact.name) for n in reply.notes)
             if added:
                 log.info("%d note suggestion(s) waiting in the dashboard", added)
 
-    def _start_rowid(self) -> int:
-        last = self.store.kv_get("chatdb_last_rowid")
-        if last is None:
-            last = str(self.chatdb.max_rowid())  # first run: start from now, not from history
-            self.store.kv_set("chatdb_last_rowid", last)
-        return int(last)
+    def poll_once(self, transport: ChatTransport) -> int:
+        """Handle everything the transport has; returns how many messages were handled."""
+        n = 0
+        for inc in transport.poll():
+            try:
+                self.handle(inc)
+            except Exception:
+                log.exception("failed handling %s", inc.guid)
+            transport.ack(inc)
+            n += 1
+        return n
 
-    def _watch_chatdb(self) -> None:
-        rowid = None
+    def _watch(self, transport: ChatTransport) -> None:
         while True:
             try:
-                if rowid is None:
-                    rowid = self._start_rowid()
-                for inc in self.chatdb.new_messages(rowid):
-                    try:
-                        self.handle(inc)
-                    except Exception:
-                        log.exception("failed handling %s", inc.guid)
-                    rowid = inc.rowid
-                    self.store.kv_set("chatdb_last_rowid", str(rowid))
+                self.poll_once(transport)
                 self.last_chatdb_read = time.time()
-                self.h_chatdb.ok()
-            except Exception as e:
-                log.exception("reading chat.db failed (Full Disk Access?)")
-                self.h_chatdb.degraded(e)
-                self.chatdb.reset()
+            except Exception:
+                log.exception("reading from %s failed%s", transport.name,
+                              " (Full Disk Access?)" if transport.name == "imessage" else "")
                 time.sleep(10)
             time.sleep(self.cfg.messages.poll_seconds)
 
@@ -238,7 +301,17 @@ class Bridge:
         threading.Thread(target=loop, name=name, daemon=True).start()
 
     def _refresh_calendar(self) -> None:
-        self.calendar = self.graph.calendar_snapshot(self.cfg.graph.calendars, self.cfg.graph.calendar_days)
+        h = self.h_calendar
+        try:
+            self.calendar = self.calendar_source.snapshot()
+        except Exception as e:
+            h.degraded(e)
+            raise
+        limitation = getattr(self.calendar_source, "limitation", None)
+        if limitation:
+            h.degraded(limitation)  # logged once: Health logs only when the state or message changes
+        else:
+            h.ok()
 
     def _prune(self) -> None:
         n = self.store.prune_messages(self.cfg.history_retention_days)
@@ -246,7 +319,9 @@ class Bridge:
             log.info("pruned %d messages older than %d days", n, self.cfg.history_retention_days)
 
     def _heartbeat(self) -> None:
-        if self.cfg.shadow_mode or not self.settings.feature("heartbeat") or self.graph is None:
+        # The heartbeat is mail to the agent's mailbox, so it only exists with the mailbox backend.
+        mailbox = self.tasks if getattr(self.tasks, "name", "") == "mailbox" else None
+        if self.cfg.shadow_mode or not self.settings.feature("heartbeat") or mailbox is None or mailbox.mail is None:
             return
         a = self.cfg.assistant
         fmt = lambda ts: datetime.fromtimestamp(ts, self.cfg.tz).strftime("%Y-%m-%d %H:%M") if ts else "never"
@@ -256,11 +331,11 @@ class Bridge:
             f"Time: {fmt(time.time())}\n"
             f"{a.name} enabled: {'yes' if self.settings.feature('mia_enabled') else 'no'}\n"
             f"Last chat.db read: {fmt(self.last_chatdb_read)}\n"
-            f"Last inbox poll: {fmt(self.poller.last_ok)}\n"
+            f"Last inbox poll: {fmt(mailbox.last_ok)}\n"
             f"Open tasks: {self.store.open_task_count()}\n"
             + ("\nNot healthy:\n" + "\n".join(f"- {u}" for u in unhealthy) + "\n" if unhealthy else "")
         )
-        self._send_mail(f"[{a.tag}-HEARTBEAT] {fmt(time.time())}", body)
+        mailbox.send(f"[{a.tag}-HEARTBEAT] {fmt(time.time())}", body)
 
     def create_dashboard(self):
         return create_app(self.settings, self.store, self.dashboard_password, self.cfg.tz, self.cfg.shadow_mode,
@@ -270,14 +345,18 @@ class Bridge:
 
     def start_background(self) -> None:
         g = self.cfg.graph
-        threading.Thread(target=self._check_messages, name="messages-check", daemon=True).start()
-        threading.Thread(target=self._watch_chatdb, name="chatdb", daemon=True).start()
+        threading.Thread(target=self._check_transports, name="transport-check", daemon=True).start()
+        for t in self.transports:
+            threading.Thread(target=self._watch, args=(t,), name=f"watch-{t.name}", daemon=True).start()
         self._every(5, self.outbound.tick, "outbound")
-        if self.graph is not None:
-            self._every(g.poll_seconds, self.poller.poll_once, "inbox-poll", self.h_mail)
-            if g.calendars:
-                self._every(g.calendar_refresh_minutes * 60, self._refresh_calendar, "calendar", self.h_calendar)
+        if self.tasks.health.state != "failed" and self.tasks.name != "none":
+            every = g.poll_seconds if self.cfg.tasks.mail == "graph" else self.cfg.tasks.poll_seconds
+            self._every(every, self.tasks.poll, "task-poll", self.tasks.health)
+        if self.tasks.name == "mailbox":
             self._every(3600, self._heartbeat, "heartbeat")
+        if self.calendar_source.name != "none" and self.h_calendar.state != "failed":
+            minutes = self.cfg.calendar.refresh_minutes or g.calendar_refresh_minutes
+            self._every(minutes * 60, self._refresh_calendar, "calendar")
         self._every(6 * 3600, self._prune, "prune")
 
     def run(self) -> None:

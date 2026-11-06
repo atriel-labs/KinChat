@@ -1,31 +1,13 @@
 import sqlite3
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
-from kinchat import secrets
 from kinchat.app import Bridge
-from kinchat.config import Config
 
 BASE = "http://127.0.0.1:8770"
-
-
-@pytest.fixture
-def no_secrets(monkeypatch):
-    monkeypatch.setattr(secrets, "_keychain", lambda service, account: None)
-    for prefix in ("KINCHAT_", "MIA_BRIDGE_"):
-        for account in ("ANTHROPIC_API_KEY", "DASHBOARD_PASSWORD", "GRAPH_CERT_KEY_B64"):
-            monkeypatch.delenv(prefix + account, raising=False)
-
-
-@pytest.fixture
-def bare_cfg(tmp_path):
-    cfg = Config(shadow_mode=True)
-    cfg.db_path = tmp_path / "state.db"
-    cfg.family_md = tmp_path / "family.md"
-    cfg.messages.chat_db = str(tmp_path / "missing-chat.db")
-    return cfg
 
 
 def states(bridge):
@@ -51,10 +33,10 @@ def test_degraded_paths_do_not_raise(no_secrets, bare_cfg):
     bridge = Bridge(bare_cfg)
     bridge._heartbeat()  # no Graph: skipped
     assert bridge._classify([], None, [], []) is None
+    imessage = bridge.transports.get("imessage")
     with pytest.raises(sqlite3.OperationalError):
-        bridge._start_rowid()  # chat.db missing: the watcher catches this and reports it
-    bridge.h_chatdb.degraded(sqlite3.OperationalError("unable to open database file"))
-    assert states(bridge)["chatdb"] == "degraded"
+        bridge.poll_once(imessage)  # chat.db missing: the watcher catches this; the transport reports it
+    assert states(bridge)["chatdb"] == "degraded" and "unable to open" in imessage.health.status.last_error
 
 
 def test_health_shown_on_dashboard(no_secrets, bare_cfg, monkeypatch):
@@ -71,3 +53,81 @@ def test_graph_and_msal_imported_lazily():
     code = "import sys, kinchat.app; print('msal' in sys.modules, 'kinchat.graph' in sys.modules)"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
     assert out.split() == ["False", "False"]
+
+
+def test_works_without_msal_installed():
+    code = (
+        "import sys; sys.modules['msal'] = None\n"  # as if the [graph] extra weren't installed
+        "import kinchat.app, kinchat.graph, kinchat.backends.cal_ics, kinchat.backends.mail_imap\n"
+        "try:\n"
+        "    kinchat.graph.Graph('t', 'c', 'x', 'k', 'm', 'UTC')\n"
+        "except RuntimeError as e:\n"
+        "    print(e)\n"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
+    assert "pip install 'kinchat[graph]'" in out
+
+
+def test_graph_built_only_when_selected(no_secrets, bare_cfg, monkeypatch):
+    g = bare_cfg.graph
+    g.tenant, g.client_id, g.cert_thumbprint, g.mailbox = "example.com", "id", "thumb", "mia@example.com"
+    built = []
+    import kinchat.graph
+    monkeypatch.setattr(kinchat.graph, "Graph", lambda *a: built.append(a) or SimpleNamespace(mailbox=a[4]))
+    monkeypatch.setattr("kinchat.secrets.graph_cert_private_key", lambda: "pem")
+    Bridge(bare_cfg)
+    assert len(built) == 1  # defaults: Graph mail + Graph calendar
+    bare_cfg.tasks.mail, bare_cfg.calendar.source = "imap", "ics"
+    b = Bridge(bare_cfg)
+    assert len(built) == 1 and b.graph is None
+
+
+class FakeGraphMail:
+    name = "graph"
+    address = "mia@example.com"
+
+    def __init__(self):
+        self.sent = []
+
+    def send(self, subject, body):
+        self.sent.append((subject, body))
+        return "<id>"
+
+    def fetch_results(self, subject_re, tag):
+        return []
+
+    def commit(self):
+        pass
+
+
+def test_default_task_backend_is_mailbox_with_heartbeat(no_secrets, bare_cfg):
+    bare_cfg.shadow_mode = False
+    bridge = Bridge(bare_cfg)
+    assert bridge.tasks.name == "mailbox" and bridge.tasks.health.status.name == "mail"
+    bridge._heartbeat()  # no mail transport (Graph not configured): skipped
+    bridge.tasks.mail = FakeGraphMail()
+    bridge._heartbeat()
+    (subject, body), = bridge.tasks.mail.sent
+    assert subject.startswith("[MIA-HEARTBEAT] ") and "Mia enabled: yes" in body and "Open tasks: 0" in body
+
+
+def test_none_task_backend(no_secrets, bare_cfg):
+    bare_cfg.tasks.backend = "none"
+    bare_cfg.shadow_mode = False
+    bridge = Bridge(bare_cfg)
+    assert bridge.tasks.name == "none" and not bridge.tasks.accepts_tasks
+    bridge._heartbeat()  # no heartbeat without the mailbox backend
+    assert "mail" not in {s.name for s in bridge.health.snapshot()}
+
+
+def test_imap_mail_selected_from_config(no_secrets, bare_cfg, monkeypatch):
+    bare_cfg.tasks.mail = "imap"
+    bridge = Bridge(bare_cfg)
+    assert bridge.tasks.health.state == "failed" and "imap not configured" in bridge.tasks.health.status.last_error
+    bare_cfg.imap.host, bare_cfg.imap.username = "imap.example.com", "assistant@example.com"
+    bridge = Bridge(bare_cfg)
+    assert "imap-app-password" in bridge.tasks.health.status.last_error  # the Keychain secret is missing
+    monkeypatch.setenv("KINCHAT_IMAP_APP_PASSWORD", "pw")
+    bridge = Bridge(bare_cfg)
+    assert bridge.tasks.mail.name == "imap" and bridge.tasks.mail.address == "assistant@example.com"
+    assert bridge.tasks.health.state == "degraded"  # configured, not polled yet

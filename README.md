@@ -11,7 +11,7 @@ A password-protected local dashboard controls who Mia talks to. Nothing listens 
 
 ```
 kinchat/
-  messages.py   chat.db reader + AppleScript sender       router.py    dashboard rules → filters → controls → cues → window → classifier
+  backends/     imessage.py (chat.db + AppleScript), fake.py router.py    dashboard rules → filters → controls → cues → window → classifier
   settings.py   features, contacts, chats, audit           outbound.py  can-speak check, quiet hours outbox, 6/10 min rate limit, shadow mode
   dashboard.py  Flask + plain HTML forms on 127.0.0.1:8770 tasks.py     [MIA-CHAT] handoff, [MIA-POST] acceptance rules
   llm.py        classifier + replier (structured output)   graph.py     app-only cert auth, inbox delta, mail, calendar snapshot
@@ -19,6 +19,9 @@ kinchat/
 ```
 
 ## Setup
+
+Install with `pip install -e '.[graph,ics]'`: `[graph]` (msal) is needed for Microsoft 365 task mail or calendar,
+the default, and `[ics]` expands recurring events in ICS calendars. `scripts/install.sh` installs both. New chat networks: see `docs/writing-a-transport.md`.
 
 1. **Mac account.** Log in as the dedicated `mia` macOS user. Sign in to Messages with the assistant's own Apple ID.
    Turn on FileVault and the firewall ("Block all incoming connections"), and disable sleep.
@@ -79,6 +82,26 @@ keeps working. `scripts/install.sh` stops the old `ai.atriel.mia-bridge` launchd
   *failed* in the dashboard's Health section (and in the heartbeat); a later error shows as *degraded* while it
   retries. Without a dashboard password the dashboard still starts, but sign-in is disabled until one is added.
   At startup the bridge asks Messages for its chat count once, so the Automation prompt appears.
+- **Chat transports:** chat IDs are namespaced `<transport>:<native id>` (e.g. `imessage:iMessage;+;chat123`), and
+  replies go out through the transport named by the prefix. `chat.transports` picks the transports (default
+  `[imessage]`). An existing `state.db` is upgraded in place by prefixing its stored IDs with `imessage:`.
+- **Task mail over IMAP:** with `tasks.mail: imap` the bridge sends task mail by SMTP and reads `[MIA-POST]` results
+  only from the account's Sent folder (forged mail lands in the Inbox, never read). Each result is posted once per
+  `(UIDVALIDITY, UID)`; `Authentication-Results` is logged, never trusted. The app password is the Keychain
+  account `imap-app-password`.
+- **Managed Agents tasks:** with `tasks.backend: managed_agents`, `kinchat agent setup` creates (or updates in place)
+  one agent and environment and records their IDs in `config.yaml`. Each task runs in its own session with a
+  spending cap (`managed_agents.budget_usd`) and the configured vaults; updates and answers go to the same
+  session. The agent can only reach the chat through its `post_to_chat` tool, which the bridge checks (task open,
+  right session), posts through the usual dashboard rules and quiet hours, and always answers at once with what
+  happened. A session that hits its cap pauses; the chat is told once and the next update starts a fresh
+  attempt. Tool calls that would need approval are denied (nobody watches these sessions live). Finished
+  sessions are archived after 24 hours.
+- **Calendar sources:** `calendar.source` is `graph` (default), `ics` or `none`. ICS feed URLs are credentials, so
+  they live in the Keychain account `ics-urls` (one per line) and are never logged. Invites that any
+  `calendar.owner_emails` attendee hasn't accepted or has declined are left out, as with Graph, for every
+  occurrence. With the `[ics]` extra, recurring events are expanded (RRULE, RDATE, EXDATE, moved instances);
+  without it they aren't, and calendar health shows *degraded* until the extra is installed.
 - **Restart:** the last processed `chat.db` row is saved; messages more than 5 minutes old when first seen
   are stored for context but not answered. The first run starts from the newest row, not from history.
 - **Results** post to the chat the task came from, never another chat; no STATUS line keeps the task open.
