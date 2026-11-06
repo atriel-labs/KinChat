@@ -119,24 +119,47 @@ def cmd_simulate(args) -> int:
     return 0
 
 
-COMMANDS = ("run", "check", "doctor", "chats", "agent", "setup", "install-agent", "simulate")
-NEEDS_NO_CONFIG = ("setup", "install-agent", "simulate")
+def cmd_migrate(args) -> int:
+    from . import migrate, paths
+
+    try:
+        if args.rollback:
+            migrate.rollback()
+            return 0
+        if args.from_ != "mia-bridge":
+            print("usage: kinchat migrate --from mia-bridge [--force] | kinchat migrate --rollback", file=sys.stderr)
+            return 2
+        migrate.migrate(force=args.force)
+    except migrate.MigrateError as e:
+        print(f"migrate: {e}", file=sys.stderr)
+        return 1
+    print("\nRunning kinchat doctor:")
+    cfg_path = paths.app_dir() / "config.yaml"
+    return cmd_doctor(config_mod.load(cfg_path)) if cfg_path.exists() else 0
+
+
+COMMANDS = ("run", "check", "doctor", "chats", "agent", "setup", "install-agent", "simulate", "migrate")
+NEEDS_NO_CONFIG = ("setup", "install-agent", "simulate", "migrate")
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="kinchat", description="Run the bridge or set it up.")
     p.add_argument("command", nargs="?", default="run", choices=COMMANDS,
-                   help="run (default), setup, doctor (alias: check), simulate, chats, agent setup, install-agent")
+                   help="run (default), setup, doctor (alias: check), simulate, migrate, chats, agent setup, install-agent")
     p.add_argument("action", nargs="?", help="for `agent`: setup")
     p.add_argument("--config", type=Path, default=APP_DIR / "config.yaml")
     p.add_argument("--answers", type=Path, help="setup: take answers from this YAML file instead of asking")
     p.add_argument("--no-install", action="store_true", help="setup: don't install the launchd agent")
+    p.add_argument("--from", dest="from_", help="migrate: the install to migrate from (mia-bridge)")
+    p.add_argument("--rollback", action="store_true", help="migrate: switch back to the mia-bridge agent")
+    p.add_argument("--force", action="store_true", help="migrate: copy even if no mia-bridge agent is found")
     p.add_argument("--script", type=Path, help="simulate: read chat lines from this file instead of the keyboard")
     p.add_argument("--probe-mailbox", help="doctor: another address in the tenant that Graph must NOT be able to read")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
     if args.command in NEEDS_NO_CONFIG:
-        return {"setup": cmd_setup, "install-agent": cmd_install_agent, "simulate": cmd_simulate}[args.command](args)
+        return {"setup": cmd_setup, "install-agent": cmd_install_agent, "simulate": cmd_simulate,
+                "migrate": cmd_migrate}[args.command](args)
     _setup_logging(args.verbose)
     cfg = config_mod.load(args.config)
     if args.command == "agent":

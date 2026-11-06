@@ -74,11 +74,47 @@ agent. `kinchat setup --answers answers.yaml` runs the same steps without prompt
 (`~/Library/Logs/kinchat/bridge.log`, and the dashboard's "Recent routing decisions") but nothing is sent.
 Review 2–3 days, tune thresholds, then set it to `false` and restart.
 
-**Upgrading from mia-bridge:** an existing `~/Library/Application Support/mia-bridge/` directory, Keychain
-items under `ai.atriel.mia-bridge` and `MIA_BRIDGE_*` environment variables are still found, so a live install
-keeps working. `scripts/install.sh` stops the old `ai.atriel.mia-bridge` launchd agent, moves its plist aside to
-`ai.atriel.mia-bridge.plist.disabled` and loads `io.kinchat.bridge`. To roll back in one command:
-`launchctl bootout gui/$(id -u)/io.kinchat.bridge; mv ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist.disabled ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist`
+## Upgrading from mia-bridge
+
+`kinchat migrate` moves a running mia-bridge install to kinchat. It never deletes or moves your old files: the old
+`~/Library/Application Support/mia-bridge/` directory and the `ai.atriel.mia-bridge` Keychain items stay exactly as
+they are, and `kinchat migrate --rollback` puts the old agent back. Do it at a quiet time; the bridge is offline
+for a few seconds.
+
+1. **Update the code** (in the project directory, as the assistant's macOS user):
+   ```
+   git pull
+   .venv/bin/pip install -e '.[graph,ics]'
+   ```
+   Don't run `scripts/install.sh` for this; `migrate` does the agent switch itself.
+2. **Migrate:**
+   ```
+   .venv/bin/kinchat migrate --from mia-bridge
+   ```
+   It stops `ai.atriel.mia-bridge` and renames its plist to `ai.atriel.mia-bridge.plist.disabled`, then copies
+   `config.yaml`, `family.md` and `state.db` into `~/Library/Application Support/kinchat/`. The database is copied
+   with SQLite's backup API and upgraded, so the bridge resumes at the same chat.db message. It copies the
+   Keychain items to the `kinchat` service and adds `assistant.handles` from `graph.mailbox` if missing. Finally it
+   installs and starts `io.kinchat.bridge`, writes `migration.json` in the kinchat directory, and runs
+   `kinchat doctor`.
+3. **If it prints a Full Disk Access warning**, the new launchd agent runs a different Python binary from the old
+   one. Add the binary it names in System Settings > Privacy & Security > Full Disk Access, then
+   `launchctl kickstart -k gui/$(id -u)/io.kinchat.bridge`.
+4. **Check:** `.venv/bin/kinchat doctor` should show no FAIL lines. Then
+   `tail -f ~/Library/Logs/kinchat/bridge.log` while someone sends a message in the family group, and open the
+   dashboard at http://127.0.0.1:8770 (same password as before).
+5. **If anything is wrong, roll back:**
+   ```
+   .venv/bin/kinchat migrate --rollback
+   ```
+   This stops `io.kinchat.bridge` (its plist becomes `io.kinchat.bridge.plist.disabled`), restores the old plist and
+   starts `ai.atriel.mia-bridge` again, on its untouched files. The kinchat directory and Keychain items are left in
+   place but unused. Running `migrate` again later re-copies from the old install, keeping the earlier copy as
+   `*.pre-migrate-<time>`. Without kinchat installed, the same rollback by hand:
+   `launchctl bootout gui/$(id -u)/io.kinchat.bridge; mv ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist.disabled ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist; launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.atriel.mia-bridge.plist`
+
+Until you migrate, kinchat still reads the old directory, Keychain items and `MIA_BRIDGE_*` variables, so updating
+the code alone doesn't break a live install.
 
 ## Dashboard rules
 
