@@ -8,6 +8,8 @@ import pytest
 
 from kinchat import keychain
 
+PTY_LIMIT = keychain.PTY_MAX
+
 pytestmark = pytest.mark.skipif(sys.platform != "darwin" or os.environ.get("KINCHAT_KEYCHAIN_TEST") != "1",
                                 reason="needs macOS and KINCHAT_KEYCHAIN_TEST=1")
 
@@ -37,3 +39,13 @@ def test_store_answers_the_real_prompt_and_reads_back(throwaway_keychain):
     assert keychain.read("test-account", "kinchat-test") == value
     keychain.store("test-account", "second value", service="kinchat-test")  # -U updates in place
     assert keychain.read("test-account", "kinchat-test") == "second value"
+
+
+@pytest.mark.parametrize("value", [
+    "QUJD" * 1024,                                                           # 4096-char base64 (Graph key)
+    " ".join(f"https://cal.example.com/feed-{i:04d}.ics" for i in range(100)),  # a long ICS URL list, spaces
+    "p" * PTY_LIMIT,                                                         # the longest value typed at the prompt
+], ids=["base64-4096", "urls-with-spaces", "prompt-limit"])
+def test_long_values_round_trip_exactly(throwaway_keychain, value):
+    keychain.store("long-account", value, service="kinchat-test")  # raises if the read-back differs
+    assert keychain.read("long-account", "kinchat-test") == value

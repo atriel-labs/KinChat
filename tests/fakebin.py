@@ -20,7 +20,24 @@ def opt(flag):
 if name == "security":
     kc = state / "keychain.json"
     items = json.loads(kc.read_text()) if kc.exists() else {{}}
+    modefile = state / "mode"
+    mode = modefile.read_text().strip() if modefile.exists() else "ok"
+    if args == ["-i"]:  # interactive: commands on stdin, shell-like quoting
+        import shlex
+        for line in sys.stdin:
+            words = shlex.split(line)
+            if not words or words[0] == "quit":
+                break
+            if words[0] == "add-generic-password":
+                w = lambda f: words[words.index(f) + 1]
+                value = w("-w")
+                items[f"{{w('-s')}}/{{w('-a')}}"] = value[:1000] if mode == "truncate" else value
+                kc.write_text(json.dumps(items))
+        sys.exit(0)
     key = f"{{opt('-s')}}/{{opt('-a')}}"
+    if args[0] == "add-generic-password" and mode == "exit45":
+        print("security: SecKeychainItemCreateFromContent: User interaction is not allowed.", file=sys.stderr)
+        sys.exit(45)
     if args[0] == "find-generic-password":
         if key in items:
             print(items[key]); sys.exit(0)
@@ -33,6 +50,10 @@ if name == "security":
             if sys.stdin.readline().rstrip("\n") != first:
                 print("passwords don't match", file=sys.stderr); sys.exit(1)
             value = first
+            if mode == "exit1_after":
+                sys.exit(1)
+            if mode == "truncate":
+                value = value[:4]
         else:
             value = opt("-w")
         items[key] = value; kc.write_text(json.dumps(items)); sys.exit(0)
@@ -88,6 +109,10 @@ class FakeBin:
         items = self.keychain()
         items[f"{service}/{account}"] = value
         (self.state / "keychain.json").write_text(json.dumps(items))
+
+    def mode(self, mode: str) -> None:
+        """ok (default), exit45 (fail before prompting), exit1_after (fail after the prompts), truncate."""
+        (self.state / "mode").write_text(mode)
 
     def loaded(self) -> set[str]:
         f = self.state / "loaded.json"

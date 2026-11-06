@@ -4,6 +4,8 @@ Moving a live mia-bridge install to kinchat, safely:
 
 - Nothing old is moved or deleted except the old launchd plist, which is renamed to *.disabled (and renamed
   back by --rollback). The old Application Support directory and the old Keychain items stay as they are.
+- Keychain items are copied first, and each is read back and compared; on any mismatch migrate stops before
+  touching anything else.
 - The old agent is stopped BEFORE state.db is copied, so nothing it writes is lost between copy and switch.
 - state.db is copied with SQLite's backup API (it is in WAL mode; a file copy can miss recent rows), then the
   schema migrations, including the chat-ID namespacing, run on the copy only.
@@ -115,6 +117,24 @@ def migrate(home: Path | None = None, force: bool = False, python: str | None = 
                    "to": str(new_dir), "copied": [], "kept_aside": [], "keychain_copied": [], "warnings": []}
     new_dir.mkdir(parents=True, exist_ok=True)
 
+    # Keychain first: each copy is read back and compared, and a failure stops here, before the old agent
+    # is touched, so the old bridge keeps running on its untouched items.
+    for account in ACCOUNTS:
+        value = keychain.read(account, LEGACY_SERVICE, run=run)
+        if value is None:
+            continue
+        value = " ".join(value.split()) if account == "ics-urls" else value
+        if keychain.read(account, SERVICE, run=run) != value:
+            try:
+                keychain.store(account, value, SERVICE, run=run)
+            except keychain.KeychainError as e:
+                raise MigrateError(f"{e}. Nothing else was changed: the old agent is still running and the "
+                                   f"{LEGACY_SERVICE} Keychain items are untouched.") from e
+        entry["keychain_copied"].append(account)
+    if entry["keychain_copied"]:
+        out(f"copied and verified Keychain items in service {SERVICE}: {', '.join(entry['keychain_copied'])} "
+            f"(the {LEGACY_SERVICE} items are untouched)")
+
     old_python = launchd.plist_python(old_plist) if old_plist.exists() else None
     moved = launchd.disable_legacy(home, run)  # stop the old bridge before copying its database
     if moved:
@@ -148,17 +168,6 @@ def migrate(home: Path | None = None, force: bool = False, python: str | None = 
         if handle:
             entry["handles_filled"] = handle
             out(f"set assistant.handles to {handle} (from graph.mailbox)")
-
-    for account in ACCOUNTS:
-        value = keychain.read(account, LEGACY_SERVICE, run=run)
-        if value is None:
-            continue
-        if keychain.read(account, SERVICE, run=run) != value:
-            keychain.store(account, " ".join(value.split()) if account == "ics-urls" else value, SERVICE)
-        entry["keychain_copied"].append(account)
-    if entry["keychain_copied"]:
-        out(f"copied Keychain items to service {SERVICE}: {', '.join(entry['keychain_copied'])} "
-            f"(the {LEGACY_SERVICE} items are untouched)")
 
     for line in launchd.install(home, python, run=run):
         out(line)

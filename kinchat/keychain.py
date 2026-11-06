@@ -1,5 +1,7 @@
 """Write secrets to the login Keychain with macOS `security`, without putting them on a command line.
 
+Every write is read back and compared, so a truncated or failed write is an error, never a silent success.
+
 `security add-generic-password ... -w <value>` would show the value to every process on the Mac (`ps`) while
 it runs. Instead `-w` is given last with no value, which makes `security` prompt for the password on its
 terminal, and we answer that prompt through a pseudo-terminal we control. The item is created by
@@ -25,9 +27,13 @@ class KeychainError(RuntimeError):
     pass
 
 
+PTY_MAX = 512  # longer values go through `security -i` on stdin (no terminal line limit)
+
+
 def answer_prompts(cmd: list[str], value: str, timeout: float = 20.0) -> int:
     """Run cmd on a new pseudo-terminal, typing `value` at every prompt (a line ending in ":"). Returns the
-    exit status. The value is never in argv, never echoed and never returned or logged."""
+    exit status; raises KeychainError if the command never prompted. The value is never in argv, never
+    echoed and never returned or logged."""
     pid, fd = pty.fork()
     if pid == 0:  # child
         try:
@@ -36,11 +42,12 @@ def answer_prompts(cmd: list[str], value: str, timeout: float = 20.0) -> int:
             os._exit(127)
     try:
         attrs = termios.tcgetattr(fd)
-        attrs[3] &= ~termios.ECHO  # don't echo what we type back to ourselves
+        attrs[3] &= ~(termios.ECHO | termios.ICANON)  # no echo; no canonical-mode line limit (MAX_CANON)
+        attrs[6][termios.VMIN], attrs[6][termios.VTIME] = 1, 0
         termios.tcsetattr(fd, termios.TCSANOW, attrs)
     except termios.error:
         pass
-    deadline, pending, answered = time.monotonic() + timeout, b"", 0
+    deadline, pending, answered, status = time.monotonic() + timeout, b"", 0, None
     try:
         while True:
             if time.monotonic() > deadline:
@@ -48,7 +55,9 @@ def answer_prompts(cmd: list[str], value: str, timeout: float = 20.0) -> int:
                 raise KeychainError(f"{cmd[0]} did not finish within {timeout:.0f}s")
             ready, _, _ = select.select([fd], [], [], 0.2)
             if not ready:
-                if os.waitpid(pid, os.WNOHANG) != (0, 0):
+                reaped, st = os.waitpid(pid, os.WNOHANG)
+                if reaped:
+                    status = st  # keep it: the final waitpid below can't get it again
                     break
                 continue
             try:
@@ -67,20 +76,45 @@ def answer_prompts(cmd: list[str], value: str, timeout: float = 20.0) -> int:
                 pending = b""
     finally:
         os.close(fd)
-    try:
-        _, status = os.waitpid(pid, 0)
-    except ChildProcessError:
-        return 0
-    return os.waitstatus_to_exitcode(status)
+    if status is None:
+        try:
+            _, status = os.waitpid(pid, 0)
+        except ChildProcessError as e:
+            raise KeychainError(f"lost track of {cmd[0]}; its result is unknown") from e
+    code = os.waitstatus_to_exitcode(status)
+    if code == 0 and answered == 0:
+        raise KeychainError(f"{cmd[0]} exited without asking for the password")
+    return code
 
 
-def store(account: str, value: str, service: str = SERVICE, runner=answer_prompts) -> None:
-    """Create or update (-U) the generic password `service`/`account`."""
+def feed_stdin(cmd: list[str], line: str, timeout: float = 20.0) -> int:
+    """Run cmd (security -i) with one command line on stdin. Returns the exit status."""
+    r = subprocess.run(cmd, input=line + "\nquit\n", capture_output=True, text=True, timeout=timeout)
+    return r.returncode
+
+
+def store(account: str, value: str, service: str = SERVICE, runner=answer_prompts, stdin_runner=feed_stdin,
+          run=subprocess.run) -> None:
+    """Create or update (-U) the generic password `service`/`account`, then read it back and compare.
+
+    Short values are typed at `security`'s own prompt through a pty. Longer ones (the base64 Graph key, a
+    list of calendar URLs) go to `security -i` as a command on stdin, quoted. Either way nothing is on argv
+    and /usr/bin/security creates the item. The read-back catches truncation or a silent failure."""
     if "\n" in value or "\r" in value:
-        raise KeychainError(f"{account}: the value must be a single line (it is typed at a prompt)")
-    code = runner(["security", "add-generic-password", "-U", "-s", service, "-a", account, "-w"], value)
+        raise KeychainError(f"{account}: the value must be a single line")
+    if len(value) <= PTY_MAX:
+        code = runner(["security", "add-generic-password", "-U", "-s", service, "-a", account, "-w"], value)
+    else:
+        if '"' in value or "\\" in value:
+            raise KeychainError(f"{account}: a value over {PTY_MAX} characters can't contain quotes or backslashes")
+        code = stdin_runner(["security", "-i"],
+                            f'add-generic-password -U -s "{service}" -a "{account}" -w "{value}"')
     if code != 0:
         raise KeychainError(f"could not store Keychain item {service}/{account} (security exit {code})")
+    stored = read(account, service, run=run)
+    if stored != value:
+        detail = "missing" if stored is None else f"{len(stored)} of {len(value)} characters"
+        raise KeychainError(f"Keychain item {service}/{account} did not read back correctly ({detail})")
 
 
 def read(account: str, service: str, run=subprocess.run) -> str | None:
