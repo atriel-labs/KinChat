@@ -95,23 +95,48 @@ def cmd_install_agent(args) -> int:
     return 0
 
 
-COMMANDS = ("run", "check", "doctor", "chats", "agent", "setup", "install-agent")
-NEEDS_NO_CONFIG = ("setup", "install-agent")
+def cmd_simulate(args) -> int:
+    from .simulate import SimulationError, Simulator
+
+    if not args.verbose:
+        logging.getLogger("kinchat").setLevel(logging.CRITICAL)  # keep the chat readable
+    else:
+        logging.basicConfig(level=logging.INFO)
+    # Your own config (if any) supplies the assistant's name and models; nothing else from it is used.
+    base = config_mod.load(args.config) if args.config.exists() else None
+    try:
+        sim = Simulator(base)
+    except SimulationError as e:
+        print(f"simulate: {e}", file=sys.stderr)
+        return 2
+    try:
+        if args.script:
+            sim.script(args.script.read_text().splitlines())
+        else:
+            sim.interactive()
+    finally:
+        sim.close()
+    return 0
+
+
+COMMANDS = ("run", "check", "doctor", "chats", "agent", "setup", "install-agent", "simulate")
+NEEDS_NO_CONFIG = ("setup", "install-agent", "simulate")
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="kinchat", description="Run the bridge or set it up.")
     p.add_argument("command", nargs="?", default="run", choices=COMMANDS,
-                   help="run (default), setup, doctor (alias: check), chats, agent setup, install-agent")
+                   help="run (default), setup, doctor (alias: check), simulate, chats, agent setup, install-agent")
     p.add_argument("action", nargs="?", help="for `agent`: setup")
     p.add_argument("--config", type=Path, default=APP_DIR / "config.yaml")
     p.add_argument("--answers", type=Path, help="setup: take answers from this YAML file instead of asking")
     p.add_argument("--no-install", action="store_true", help="setup: don't install the launchd agent")
+    p.add_argument("--script", type=Path, help="simulate: read chat lines from this file instead of the keyboard")
     p.add_argument("--probe-mailbox", help="doctor: another address in the tenant that Graph must NOT be able to read")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args(argv)
     if args.command in NEEDS_NO_CONFIG:
-        return {"setup": cmd_setup, "install-agent": cmd_install_agent}[args.command](args)
+        return {"setup": cmd_setup, "install-agent": cmd_install_agent, "simulate": cmd_simulate}[args.command](args)
     _setup_logging(args.verbose)
     cfg = config_mod.load(args.config)
     if args.command == "agent":

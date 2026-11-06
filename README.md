@@ -4,6 +4,25 @@ A Claude-powered assistant for your family’s iMessage group chat. Answers in s
 > **Status:** being prepared for open source. The assistant is called Mia by default; set `assistant.name`,
 > `aliases`, `tag` and `handles` in `config.yaml` to give it another name (see `config.example.yaml`).
 
+## Try it in 2 minutes
+
+You need Python 3.12+ and an **Anthropic API key** (the simulator makes real Claude API calls). No Mac, Messages
+or mailbox is needed: `kinchat simulate` runs the real router and replier over an in-memory chat with a made-up
+family (Alex, Sam and Jordan) and a temporary database that is deleted when you quit.
+
+```
+git clone https://github.com/atriel-labs/KinChat && cd KinChat
+python3 -m venv .venv && .venv/bin/pip install -e .
+export KINCHAT_ANTHROPIC_API_KEY=sk-ant-...
+.venv/bin/kinchat simulate
+```
+
+Type as a family member; the assistant answers when it's addressed. `/as Sam` switches who is talking, `/dm`
+and `/group` switch chats, and `/why` shows why the last message was or wasn't answered. Task hand-offs are only
+echoed. `kinchat simulate --script lines.txt` runs a file of lines and prints each decision.
+
+## How it works
+
 Puts Mia in the family iMessage group. The bridge reads new messages straight from the Messages
 database (`chat.db`), routes each one (Claude Haiku), replies instantly (Claude Sonnet) by scripting
 Messages, hands real work to Mia in Duet by `[MIA-CHAT]` email, and posts `[MIA-POST]` results back.
