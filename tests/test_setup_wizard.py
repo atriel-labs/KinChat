@@ -12,7 +12,7 @@ from kinchat import setup_wizard as sw
 SECRETS = {
     "anthropic-api-key": "sk-ant-TESTSECRET-0001",
     "dashboard-password": "dash-TESTSECRET-0002",
-    "graph-cert-key-b64": "cGVtLVRFU1RTRUNSRVQtMDAwMw==",
+    "graph-cert-key-b64": "fake-pem-b64-TESTSECRET-0003",
     "imap-app-password": "imap-TESTSECRET-0004",
     "ics-urls": "https://cal.example.com/TESTSECRET-0005.ics https://cal.example.com/TESTSECRET-0006.ics",
 }

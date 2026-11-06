@@ -1,0 +1,4 @@
+# Findings that are known test fixtures, not secrets. Each line is one gitleaks fingerprint
+# (commit:file:rule:line), so a new real secret anywhere is still caught.
+# A made-up base64 placeholder for the Graph certificate key in the setup wizard tests:
+f310e187ab62038c85020034a9654b5ecda67c43:tests/test_setup_wizard.py:generic-api-key:15
