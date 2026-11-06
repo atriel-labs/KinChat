@@ -34,7 +34,7 @@ agent. `kinchat setup --answers answers.yaml` runs the same steps without prompt
    `~/Library/Application Support/kinchat/`, loads the launchd agent `io.kinchat.bridge`, and prints
    the Python binary that needs Full Disk Access. The agent restarts repeatedly until steps 3–5 are done.
 3. **Permissions.** In System Settings → Privacy & Security → Full Disk Access, add the Python binary the
-   installer printed (needed to read `chat.db`). Then run `.venv/bin/python -m kinchat check` once from
+   installer printed (needed to read `chat.db`). Then run `.venv/bin/kinchat doctor` once from
    Terminal and allow the "control Messages" Automation prompt.
 4. **Entra "Mia Bridge" app.** Certificate auth, `Mail.ReadWrite` / `Mail.Send` / `Calendars.Read`, scoped
    with Exchange RBAC for Applications, verified with `Test-ServicePrincipalAuthorization`.
@@ -45,7 +45,8 @@ agent. `kinchat setup --answers answers.yaml` runs the same steps without prompt
    security add-generic-password -s kinchat -a dashboard-password -w '...'
    security add-generic-password -s kinchat -a graph-cert-key-b64 -w "$(base64 -i key.pem | tr -d '\n')"
    ```
-6. **Verify:** `.venv/bin/python -m kinchat check`, then `launchctl kickstart -k gui/$(id -u)/io.kinchat.bridge`.
+6. **Verify:** `.venv/bin/kinchat doctor` (add `--probe-mailbox <another address>` to confirm Graph can't read
+   other mailboxes); every FAIL line says how to fix it. Then `launchctl kickstart -k gui/$(id -u)/io.kinchat.bridge`.
 7. **Dashboard:** open http://127.0.0.1:8770. Add the family members as contacts. From a family member's phone, start a
    group with the others and the assistant's Apple ID and send a message. The group appears under Approved chats as
    **Pending**; set it to **Respond**.
